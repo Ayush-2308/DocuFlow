@@ -11,6 +11,8 @@ class Settings:
     supabase_url: str
     supabase_key: str
     ocr_api_key: str
+    ocr_endpoint: str
+    ocr_provider: str
     llm_api_key: str
     llm_provider: str
 
@@ -26,6 +28,8 @@ settings = Settings(
     supabase_url=_require_env("SUPABASE_URL"),
     supabase_key=_require_env("SUPABASE_KEY"),
     ocr_api_key=_require_env("OCR_API_KEY"),
+    ocr_endpoint=_require_env("OCR_ENDPOINT"),
+    ocr_provider=_require_env("OCR_PROVIDER"),
     llm_api_key=_require_env("LLM_API_KEY"),
     llm_provider=_require_env("LLM_PROVIDER"),
 )
