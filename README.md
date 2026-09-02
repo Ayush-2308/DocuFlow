@@ -1,23 +1,36 @@
 # DocuFlow
 
-Multi-agent document processing pipeline that performs OCR, extraction, validation, and categorization on invoices, receipts, and KYC documents — orchestrated via LangGraph and stored in Supabase.
+Multi-agent **document automation** pipeline: OCR → LLM extraction → validation → category → Supabase.
 
-## Status
-🚧 Work in progress — building incrementally, agent by agent.
+Upload an invoice, receipt, or KYC PDF/image. The app returns structured fields (or sends the doc to review) and stores successful runs in the database.
 
-## Tech Stack
-- Python
-- FastAPI
-- LangGraph
-- Pydantic
-- Supabase
+| | |
+|---|---|
+| **Live demo** | https://docuflow-gbh3.onrender.com |
+| **Full documentation** | [docs/DOCUMENTATION.md](docs/DOCUMENTATION.md) |
+| **API (Swagger)** | https://docuflow-gbh3.onrender.com/docs |
 
-## Roadmap
-- [x] Project setup + Pydantic schemas
-- [ ] OCR agent
-- [ ] Extraction agent (LLM-based)
-- [ ] Validation agent
-- [ ] Categorization agent
-- [ ] LangGraph orchestration
-- [ ] Supabase integration
-- [ ] FastAPI endpoint
+## What it does
+
+```
+Upload → OCR (Mistral) → Extract JSON (Gemini/OpenAI/Anthropic)
+      → Validate → if low confidence: needs_review
+                 → else: categorize → save to Supabase
+```
+
+## Tech
+
+Python, FastAPI, LangGraph, Pydantic, Supabase, static HTML UI.
+
+## Run locally
+
+See [docs/DOCUMENTATION.md](docs/DOCUMENTATION.md#13-local-setup) — app lives in `docuflow/`.
+
+```bash
+cd docuflow
+pip install -r requirements.txt
+cp .env.example .env   # add real keys
+uvicorn main:app --host 127.0.0.1 --port 8000
+```
+
+Never commit `.env`. Keys go in local `.env` or the host’s environment variables (e.g. Render).

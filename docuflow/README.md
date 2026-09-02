@@ -2,6 +2,9 @@
 
 Multi-agent document processing pipeline for invoices, receipts, and KYC documents. OCR, field extraction, validation, and categorization are orchestrated with LangGraph and persisted in Supabase.
 
+**Full write-up (architecture, agents, API, deploy):** see [../docs/DOCUMENTATION.md](../docs/DOCUMENTATION.md) from the repo root, or `docs/DOCUMENTATION.md` on GitHub.
+
+
 ## Architecture
 
 ```
