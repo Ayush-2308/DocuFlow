@@ -1,0 +1,47 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>DocuFlow</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link href="https://fonts.googleapis.com/css2?family=Fraunces:opsz,wght@9..144,500;9..144,700&family=Source+Sans+3:wght@400;600;700&display=swap" rel="stylesheet" />
+  <link rel="stylesheet" href="/static/styles.css" />
+</head>
+<body>
+  <div class="page">
+    <header class="top">
+      <div>
+        <p class="mark">DocuFlow</p>
+        <h1>Read the document.<br />Keep the facts.</h1>
+      </div>
+      <p class="lede">Upload an invoice, receipt, or KYC file. OCR, extraction, validation, and storage still run on the same backend pipeline.</p>
+    </header>
+
+    <form id="upload-form" class="panel">
+      <label class="drop" id="drop">
+        <input id="file" name="file" type="file" accept=".pdf,image/*" required />
+        <span class="drop-title" id="file-label">Drop a PDF or image here</span>
+        <span class="drop-hint">or click to browse · PDF, PNG, JPG</span>
+      </label>
+
+      <div class="row">
+        <label class="field">
+          <span>Document type</span>
+          <select id="doc_type_hint" name="doc_type_hint" required>
+            <option value="invoice">Invoice</option>
+            <option value="receipt">Receipt</option>
+            <option value="kyc">KYC (Aadhaar / PAN / Passport)</option>
+          </select>
+        </label>
+        <button type="submit" id="submit">Process document</button>
+      </div>
+    </form>
+
+    <p class="status" id="status" hidden></p>
+    <section class="result" id="result" hidden></section>
+  </div>
+  <script src="/static/app.js"></script>
+</body>
+</html>
