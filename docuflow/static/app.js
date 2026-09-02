@@ -42,22 +42,43 @@ form.addEventListener("submit", async (event) => {
   submit.disabled = true;
   resultEl.hidden = true;
   statusEl.hidden = false;
-  statusEl.textContent = "Running OCR → extraction → validation… this can take a minute.";
+  statusEl.textContent = "Queued. OCR and extraction run in the background…";
 
   try {
-    const response = await fetch("/upload", { method: "POST", body });
-    const payload = await response.json();
-    if (!response.ok) {
-      throw new Error(payload.detail || "Upload failed");
+    const started = await fetch("/upload", { method: "POST", body });
+    const startPayload = await started.json();
+    if (!started.ok) {
+      throw new Error(startPayload.detail || "Upload failed");
     }
+    const result = await pollJob(startPayload.job_id);
     statusEl.textContent = "Done.";
-    renderResult(payload);
+    renderResult(result);
   } catch (error) {
     statusEl.textContent = error.message || "Something went wrong.";
   } finally {
     submit.disabled = false;
   }
 });
+
+async function pollJob(jobId) {
+  const deadline = Date.now() + 5 * 60 * 1000;
+  while (Date.now() < deadline) {
+    await new Promise((resolve) => setTimeout(resolve, 2000));
+    const response = await fetch(`/jobs/${jobId}`);
+    const payload = await response.json();
+    if (!response.ok) {
+      throw new Error(payload.detail || "Lost job status");
+    }
+    if (payload.status === "done") {
+      return payload.result;
+    }
+    if (payload.status === "error") {
+      throw new Error(payload.error || "Pipeline failed");
+    }
+    statusEl.textContent = "Still working (OCR + AI). Keep this tab open…";
+  }
+  throw new Error("Timed out after 5 minutes. Try again in a bit.");
+}
 
 function renderResult(data) {
   const score = data.confidence_score;

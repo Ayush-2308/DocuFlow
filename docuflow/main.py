@@ -1,21 +1,26 @@
 import uuid
 from pathlib import Path
 from tempfile import NamedTemporaryFile
+from threading import Lock
+from typing import Any
 
-from fastapi import FastAPI, File, Form, HTTPException, UploadFile
+from fastapi import BackgroundTasks, FastAPI, File, Form, HTTPException, UploadFile
 from fastapi.responses import FileResponse
 from fastapi.staticfiles import StaticFiles
 
+from agents.extraction_agent import GEMINI_MODEL
+from config import settings
 from db.supabase_client import log_pipeline_error
 from graph import run_pipeline
 from schemas.models import PipelineState
-from agents.extraction_agent import GEMINI_MODEL
-from config import settings
 
 STATIC_DIR = Path(__file__).resolve().parent / "static"
 
 app = FastAPI(title="DocuFlow", version="0.1.0")
 app.mount("/static", StaticFiles(directory=STATIC_DIR), name="static")
+
+_jobs: dict[str, dict[str, Any]] = {}
+_jobs_lock = Lock()
 
 
 @app.get("/", include_in_schema=False)
@@ -32,36 +37,63 @@ def health() -> dict:
     }
 
 
-@app.post("/upload", response_model=PipelineState)
+@app.post("/upload")
 async def upload(
+    background_tasks: BackgroundTasks,
     file: UploadFile = File(...),
     doc_type_hint: str | None = Form(None),
-) -> PipelineState:
+) -> dict:
     document_id = str(uuid.uuid4())
     suffix = Path(file.filename or "upload.bin").suffix
-    temp_path: str | None = None
+    contents = await file.read()
+    if not contents:
+        raise HTTPException(status_code=400, detail="Uploaded file is empty")
 
+    with NamedTemporaryFile(delete=False, suffix=suffix) as tmp:
+        temp_path = tmp.name
+        tmp.write(contents)
+
+    job_id = str(uuid.uuid4())
+    with _jobs_lock:
+        _jobs[job_id] = {"status": "processing"}
+    background_tasks.add_task(
+        _run_job, job_id, temp_path, doc_type_hint, document_id
+    )
+    return {"job_id": job_id, "status": "processing"}
+
+
+@app.get("/jobs/{job_id}")
+def job_status(job_id: str) -> dict:
+    with _jobs_lock:
+        job = _jobs.get(job_id)
+    if job is None:
+        raise HTTPException(status_code=404, detail="Unknown job")
+    return job
+
+
+def _run_job(
+    job_id: str,
+    temp_path: str,
+    doc_type_hint: str | None,
+    document_id: str,
+) -> None:
     try:
-        with NamedTemporaryFile(delete=False, suffix=suffix) as tmp:
-            temp_path = tmp.name
-            contents = await file.read()
-            if not contents:
-                raise HTTPException(status_code=400, detail="Uploaded file is empty")
-            tmp.write(contents)
-
-        return run_pipeline(
+        state: PipelineState = run_pipeline(
             file_path=temp_path,
             doc_type_hint=doc_type_hint,
             document_id=document_id,
         )
-    except HTTPException:
-        raise
+        with _jobs_lock:
+            _jobs[job_id] = {
+                "status": "done",
+                "result": state.model_dump(mode="json"),
+            }
     except Exception as exc:
         try:
             log_pipeline_error(document_id, str(exc))
         except Exception:
             pass
-        raise HTTPException(status_code=500, detail=f"Pipeline failed: {exc}") from exc
+        with _jobs_lock:
+            _jobs[job_id] = {"status": "error", "error": str(exc)}
     finally:
-        if temp_path:
-            Path(temp_path).unlink(missing_ok=True)
+        Path(temp_path).unlink(missing_ok=True)

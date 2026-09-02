@@ -12,7 +12,7 @@ from schemas.models import Invoice, KYCDocument, Receipt
 OPENAI_CHAT_URL = "https://api.openai.com/v1/chat/completions"
 ANTHROPIC_MESSAGES_URL = "https://api.anthropic.com/v1/messages"
 GEMINI_MODEL = "gemini-3.6-flash"
-GEMINI_FALLBACK_MODELS = ("gemini-3.6-flash", "gemini-3.5-flash", "gemini-2.5-flash")
+GEMINI_FALLBACK_MODELS = ("gemini-3.6-flash", "gemini-2.5-flash")
 OPENAI_MODEL = "gpt-4o-mini"
 ANTHROPIC_MODEL = "claude-3-5-sonnet-latest"
 ANTHROPIC_VERSION = "2023-06-01"
@@ -296,7 +296,7 @@ def _call_gemini(prompt: str) -> str:
             "https://generativelanguage.googleapis.com/v1beta/models/"
             f"{model}:generateContent"
         )
-        for attempt in range(3):
+        for attempt in range(2):
             try:
                 response = httpx.post(
                     url,
@@ -305,13 +305,13 @@ def _call_gemini(prompt: str) -> str:
                         "Content-Type": "application/json",
                     },
                     json=payload,
-                    timeout=120.0,
+                    timeout=45.0,
                 )
                 if response.status_code in {429, 503}:
                     last_error = (
                         f"Gemini {model} status {response.status_code}: {response.text.strip()}"
                     )
-                    time.sleep(2 * (attempt + 1))
+                    time.sleep(1.5)
                     continue
                 response.raise_for_status()
             except httpx.HTTPStatusError as exc:
