@@ -1,5 +1,6 @@
 import json
 import re
+import time
 from typing import Any, Type
 
 import httpx
@@ -11,9 +12,7 @@ from schemas.models import Invoice, KYCDocument, Receipt
 OPENAI_CHAT_URL = "https://api.openai.com/v1/chat/completions"
 ANTHROPIC_MESSAGES_URL = "https://api.anthropic.com/v1/messages"
 GEMINI_MODEL = "gemini-3.6-flash"
-GEMINI_GENERATE_URL = (
-    f"https://generativelanguage.googleapis.com/v1beta/models/{GEMINI_MODEL}:generateContent"
-)
+GEMINI_FALLBACK_MODELS = ("gemini-3.6-flash", "gemini-3.5-flash", "gemini-2.5-flash")
 OPENAI_MODEL = "gpt-4o-mini"
 ANTHROPIC_MODEL = "claude-3-5-sonnet-latest"
 ANTHROPIC_VERSION = "2023-06-01"
@@ -281,49 +280,65 @@ def _call_anthropic(prompt: str) -> str:
 
 
 def _call_gemini(prompt: str) -> str:
-    try:
-        response = httpx.post(
-            GEMINI_GENERATE_URL,
-            headers={
-                "x-goog-api-key": settings.llm_api_key,
-                "Content-Type": "application/json",
-            },
-            json={
-                "systemInstruction": {
-                    "parts": [
-                        {"text": "Return only valid JSON. No markdown or extra text."}
-                    ]
-                },
-                "contents": [{"role": "user", "parts": [{"text": prompt}]}],
-                "generationConfig": {
-                    "temperature": 0,
-                    "responseMimeType": "application/json",
-                },
-            },
-            timeout=120.0,
+    payload = {
+        "systemInstruction": {
+            "parts": [{"text": "Return only valid JSON. No markdown or extra text."}]
+        },
+        "contents": [{"role": "user", "parts": [{"text": prompt}]}],
+        "generationConfig": {
+            "temperature": 0,
+            "responseMimeType": "application/json",
+        },
+    }
+    last_error = "Gemini request failed"
+    for model in GEMINI_FALLBACK_MODELS:
+        url = (
+            "https://generativelanguage.googleapis.com/v1beta/models/"
+            f"{model}:generateContent"
         )
-        response.raise_for_status()
-    except httpx.HTTPStatusError as exc:
-        detail = exc.response.text.strip() or exc.response.reason_phrase
-        raise ExtractionError(
-            f"Gemini request failed with status {exc.response.status_code} "
-            f"(model={GEMINI_MODEL}): {detail}"
-        ) from exc
-    except httpx.HTTPError as exc:
-        raise ExtractionError(f"Gemini request failed: {exc}") from exc
+        for attempt in range(3):
+            try:
+                response = httpx.post(
+                    url,
+                    headers={
+                        "x-goog-api-key": settings.llm_api_key,
+                        "Content-Type": "application/json",
+                    },
+                    json=payload,
+                    timeout=120.0,
+                )
+                if response.status_code in {429, 503}:
+                    last_error = (
+                        f"Gemini {model} status {response.status_code}: {response.text.strip()}"
+                    )
+                    time.sleep(2 * (attempt + 1))
+                    continue
+                response.raise_for_status()
+            except httpx.HTTPStatusError as exc:
+                last_error = (
+                    f"Gemini request failed with status {exc.response.status_code} "
+                    f"(model={model}): {exc.response.text.strip() or exc.response.reason_phrase}"
+                )
+                break
+            except httpx.HTTPError as exc:
+                last_error = f"Gemini request failed (model={model}): {exc}"
+                break
 
-    try:
-        body = response.json()
-        parts = body["candidates"][0]["content"]["parts"]
-        content = "".join(
-            part.get("text", "") for part in parts if isinstance(part, dict)
-        ).strip()
-    except (ValueError, KeyError, IndexError, TypeError) as exc:
-        raise ExtractionError("Gemini returned an unexpected response shape") from exc
+            try:
+                body = response.json()
+                parts = body["candidates"][0]["content"]["parts"]
+                content = "".join(
+                    part.get("text", "") for part in parts if isinstance(part, dict)
+                ).strip()
+            except (ValueError, KeyError, IndexError, TypeError) as exc:
+                raise ExtractionError("Gemini returned an unexpected response shape") from exc
 
-    if not content:
-        raise ExtractionError("Gemini returned an empty response")
-    return content
+            if not content:
+                last_error = f"Gemini returned an empty response (model={model})"
+                break
+            return content
+
+    raise ExtractionError(last_error)
 
 
 def _fill_template(template: str, **values: str) -> str:
