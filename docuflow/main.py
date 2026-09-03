@@ -4,11 +4,12 @@ from tempfile import NamedTemporaryFile
 from threading import Lock
 from typing import Any
 
-from fastapi import BackgroundTasks, FastAPI, File, Form, HTTPException, UploadFile
+from fastapi import BackgroundTasks, Depends, FastAPI, File, Form, Header, HTTPException, UploadFile
 from fastapi.responses import FileResponse
 from fastapi.staticfiles import StaticFiles
 
 from agents.extraction_agent import GEMINI_MODEL
+from agents.search_agent import search_identity
 from config import settings
 from db.supabase_client import log_pipeline_error
 from graph import run_pipeline
@@ -69,6 +70,24 @@ def job_status(job_id: str) -> dict:
     if job is None:
         raise HTTPException(status_code=404, detail="Unknown job")
     return job
+
+
+def require_search_api_key(x_api_key: str | None = Header(default=None, alias="X-API-Key")) -> None:
+    if not x_api_key or x_api_key != settings.search_api_key:
+        raise HTTPException(status_code=401, detail="Invalid or missing API key")
+
+
+@app.get("/search")
+def search_documents(
+    query: str,
+    _: None = Depends(require_search_api_key),
+) -> dict:
+    if not query or not query.strip():
+        raise HTTPException(status_code=400, detail="query is required")
+    try:
+        return search_identity(query.strip())
+    except Exception as exc:
+        raise HTTPException(status_code=500, detail=f"Search failed: {exc}") from exc
 
 
 def _run_job(

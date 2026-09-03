@@ -15,6 +15,7 @@ class Settings:
     ocr_provider: str
     llm_api_key: str
     llm_provider: str
+    search_api_key: str
 
 
 def _require_env(name: str) -> str:
@@ -32,4 +33,5 @@ settings = Settings(
     ocr_provider=_require_env("OCR_PROVIDER"),
     llm_api_key=_require_env("LLM_API_KEY"),
     llm_provider=_require_env("LLM_PROVIDER"),
+    search_api_key=_require_env("SEARCH_API_KEY"),
 )

@@ -205,8 +205,49 @@ Nodes in order:
 | `GET` | `/docs` | Swagger (FastAPI built-in) |
 | `POST` | `/upload` | Multipart `file` + optional `doc_type_hint` → `{ job_id, status: "processing" }` |
 | `GET` | `/jobs/{job_id}` | `{ status: processing }` or `{ status: done, result: PipelineState }` or `{ status: error, error: "..." }` |
+| `GET` | `/search?query=` | Identity search over stored `extracted_data` (**requires `X-API-Key`**) |
 
 `doc_type_hint` values: `invoice`, `receipt`, `kyc` (case-insensitive in agents).
+
+### 9.1 Identity search
+
+`GET /search?query={text}` looks up **already stored** rows in `processed_documents` (not the live PDF). It does a case-insensitive partial match on JSONB fields `full_name`, `vendor_name`, and `merchant_name`.
+
+**Auth:** header `X-API-Key` must equal env `SEARCH_API_KEY`. Missing or wrong key → **401**. `/upload` stays open without this key.
+
+**Natural language:** a short name like `Ayush` is used as-is. Phrases such as `show me Ayush's last invoice` are parsed with the configured `LLM_PROVIDER` into `{name, doc_type, latest}` and then turned into a Supabase filter. If the LLM fails, the full string is treated as the name.
+
+**Masking:** `utils/sanitize.py` → `sanitize_response()`. Applied only on the **API response**, never written back to the database.
+
+- Aadhaar `id_number`: `XXXX-XXXX-` + last 4 digits  
+- PAN `id_number`: first 5 characters replaced with `X` (e.g. `ABCDE1234F` → `XXXXX1234F`)
+
+**Example**
+
+```http
+GET /search?query=Ayush
+X-API-Key: <SEARCH_API_KEY>
+```
+
+```json
+{
+  "query": "Ayush",
+  "results": [
+    {
+      "document_type": "kyc",
+      "document_id": "...",
+      "data": { "full_name": "...", "id_number": "XXXX-XXXX-0123" }
+    },
+    {
+      "document_type": "invoice",
+      "document_id": "...",
+      "data": { "vendor_name": "..." }
+    }
+  ]
+}
+```
+
+Results are ordered KYC, then invoice, then receipt. `latest: true` keeps only the newest matching row.
 
 ---
 
@@ -242,6 +283,7 @@ Copy `docuflow/.env.example` → `docuflow/.env` locally. On Render, set the sam
 | `OCR_PROVIDER` | `mistral` |
 | `LLM_API_KEY` | Gemini / OpenAI / Anthropic key |
 | `LLM_PROVIDER` | `gemini` \| `openai` \| `anthropic` |
+| `SEARCH_API_KEY` | Shared secret for `GET /search` (`X-API-Key` header) |
 
 `config.py` **fails at import** if any are missing (that is why Render crashed before env vars were added).
 
@@ -300,6 +342,7 @@ User uploads `hotel-bill.pdf`, type **Invoice**.
 - FastAPI + static UI  
 - Async jobs so hosted HTTP does not time out  
 - Gemini 503 retries / model fallback  
+- Identity search (`GET /search`) with Aadhaar/PAN response masking and `X-API-Key`  
 
 ---
 

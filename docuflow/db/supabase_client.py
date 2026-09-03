@@ -56,6 +56,43 @@ def log_pipeline_error(document_id: str, error: str) -> None:
     _raise_if_error(result, "log pipeline error")
 
 
+def search_processed_documents(
+    name: str,
+    doc_type: str | None = None,
+) -> list[dict]:
+    """Case-insensitive partial match on name fields inside extracted_data JSONB."""
+    needle = _safe_ilike_fragment(name)
+    if not needle:
+        return []
+
+    pattern = f"%{needle}%"
+    query = (
+        supabase.table("processed_documents")
+        .select(
+            "document_id, doc_type_hint, extracted_data, created_at, status, category"
+        )
+        .or_(
+            f"extracted_data->>full_name.ilike.{pattern},"
+            f"extracted_data->>vendor_name.ilike.{pattern},"
+            f"extracted_data->>merchant_name.ilike.{pattern}"
+        )
+        .order("created_at", desc=True)
+    )
+    if doc_type in {"invoice", "receipt", "kyc"}:
+        query = query.ilike("doc_type_hint", doc_type)
+
+    result = query.execute()
+    _raise_if_error(result, "search processed_documents")
+    return list(result.data or [])
+
+
+def _safe_ilike_fragment(value: str) -> str:
+    cleaned = (value or "").strip()
+    for char in ("%","_", ",", "(", ")", "\\"):
+        cleaned = cleaned.replace(char, " ")
+    return " ".join(cleaned.split())
+
+
 def _raise_if_error(result: object, action: str) -> None:
     error = getattr(result, "error", None)
     if error:
