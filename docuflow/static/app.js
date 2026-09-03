@@ -5,6 +5,32 @@ const drop = document.getElementById("drop");
 const statusEl = document.getElementById("status");
 const resultEl = document.getElementById("result");
 const submit = document.getElementById("submit");
+const tabUpload = document.getElementById("tab-upload");
+const tabSearch = document.getElementById("tab-search");
+const panelUpload = document.getElementById("panel-upload");
+const panelSearch = document.getElementById("panel-search");
+const searchForm = document.getElementById("search-form");
+const searchQuery = document.getElementById("search-query");
+const searchKey = document.getElementById("search-api-key");
+const searchSubmit = document.getElementById("search-submit");
+const searchStatus = document.getElementById("search-status");
+const searchResult = document.getElementById("search-result");
+
+const savedKey = sessionStorage.getItem("docuflowSearchKey");
+if (savedKey && searchKey) searchKey.value = savedKey;
+
+function showTab(name) {
+  const upload = name === "upload";
+  tabUpload.classList.toggle("is-active", upload);
+  tabSearch.classList.toggle("is-active", !upload);
+  tabUpload.setAttribute("aria-selected", String(upload));
+  tabSearch.setAttribute("aria-selected", String(!upload));
+  panelUpload.hidden = !upload;
+  panelSearch.hidden = upload;
+}
+
+tabUpload.addEventListener("click", () => showTab("upload"));
+tabSearch.addEventListener("click", () => showTab("search"));
 
 fileInput.addEventListener("change", () => {
   fileLabel.textContent = fileInput.files[0]?.name || "Drop a PDF or image here";
@@ -52,11 +78,42 @@ form.addEventListener("submit", async (event) => {
     }
     const result = await pollJob(startPayload.job_id);
     statusEl.textContent = "Done.";
-    renderResult(result);
+    renderResult(resultEl, result);
   } catch (error) {
     statusEl.textContent = error.message || "Something went wrong.";
   } finally {
     submit.disabled = false;
+  }
+});
+
+searchForm.addEventListener("submit", async (event) => {
+  event.preventDefault();
+  const query = searchQuery.value.trim();
+  const apiKey = searchKey.value.trim();
+  if (!query || !apiKey) return;
+  sessionStorage.setItem("docuflowSearchKey", apiKey);
+
+  searchSubmit.disabled = true;
+  searchResult.hidden = true;
+  searchStatus.hidden = false;
+  searchStatus.textContent = "Searching stored records…";
+
+  try {
+    const response = await fetch(`/search?query=${encodeURIComponent(query)}`, {
+      headers: { "X-API-Key": apiKey },
+    });
+    const payload = await response.json();
+    if (!response.ok) {
+      throw new Error(payload.detail || "Search failed");
+    }
+    searchStatus.textContent = payload.results?.length
+      ? `Found ${payload.results.length} record(s).`
+      : "No matching records.";
+    renderSearchResults(payload);
+  } catch (error) {
+    searchStatus.textContent = error.message || "Search failed.";
+  } finally {
+    searchSubmit.disabled = false;
   }
 });
 
@@ -80,7 +137,36 @@ async function pollJob(jobId) {
   throw new Error("Timed out after 5 minutes. Try again in a bit.");
 }
 
-function renderResult(data) {
+function renderSearchResults(payload) {
+  const hits = payload.results || [];
+  searchResult.hidden = false;
+  if (!hits.length) {
+    searchResult.innerHTML = "<p>No stored documents matched that query.</p>";
+    return;
+  }
+  searchResult.innerHTML = hits
+    .map((hit) => {
+      const data = hit.data || {};
+      const rows = Object.entries(data)
+        .map(([key, value]) => {
+          const shown =
+            typeof value === "object" ? JSON.stringify(value, null, 2) : String(value ?? "—");
+          return `<dt>${escapeHtml(key)}</dt><dd>${escapeHtml(shown)}</dd>`;
+        })
+        .join("");
+      return `
+        <article class="search-hit">
+          <div class="meta">
+            <span class="chip">${escapeHtml(hit.document_type || "unknown")}</span>
+            <span class="chip">${escapeHtml(hit.document_id || "")}</span>
+          </div>
+          <dl>${rows}</dl>
+        </article>`;
+    })
+    .join("");
+}
+
+function renderResult(target, data) {
   const score = data.confidence_score;
   const status = data.status || "";
   const chipClass =
@@ -97,8 +183,8 @@ function renderResult(data) {
     .map((item) => `<li>${escapeHtml(item)}</li>`)
     .join("");
 
-  resultEl.hidden = false;
-  resultEl.innerHTML = `
+  target.hidden = false;
+  target.innerHTML = `
     <div class="meta">
       <span class="chip ${chipClass}">${escapeHtml(status || "unknown")}</span>
       <span class="chip">${escapeHtml(data.category || "Uncategorized")}</span>

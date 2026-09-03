@@ -16,31 +16,53 @@
         <p class="mark">DocuFlow</p>
         <h1>Read the document.<br />Keep the facts.</h1>
       </div>
-      <p class="lede">Upload an invoice, receipt, or KYC file. OCR, extraction, validation, and storage still run on the same backend pipeline.</p>
+      <p class="lede">Upload invoices, receipts, or KYC files — or search stored identities. The same backend pipeline handles OCR, extraction, validation, and storage.</p>
     </header>
 
-    <form id="upload-form" class="panel">
-      <label class="drop" id="drop">
-        <input id="file" name="file" type="file" accept=".pdf,image/*" required />
-        <span class="drop-title" id="file-label">Drop a PDF or image here</span>
-        <span class="drop-hint">or click to browse · PDF, PNG, JPG</span>
-      </label>
+    <nav class="tabs" role="tablist">
+      <button type="button" class="tab is-active" id="tab-upload" role="tab" aria-selected="true">Upload</button>
+      <button type="button" class="tab" id="tab-search" role="tab" aria-selected="false">Search</button>
+    </nav>
 
-      <div class="row">
-        <label class="field">
-          <span>Document type</span>
-          <select id="doc_type_hint" name="doc_type_hint" required>
-            <option value="invoice">Invoice</option>
-            <option value="receipt">Receipt</option>
-            <option value="kyc">KYC (Aadhaar / PAN / Passport)</option>
-          </select>
+    <section id="panel-upload" class="tab-panel">
+      <form id="upload-form" class="panel">
+        <label class="drop" id="drop">
+          <input id="file" name="file" type="file" accept=".pdf,image/*" required />
+          <span class="drop-title" id="file-label">Drop a PDF or image here</span>
+          <span class="drop-hint">or click to browse · PDF, PNG, JPG</span>
         </label>
-        <button type="submit" id="submit">Process document</button>
-      </div>
-    </form>
+        <div class="row">
+          <label class="field">
+            <span>Document type</span>
+            <select id="doc_type_hint" name="doc_type_hint" required>
+              <option value="invoice">Invoice</option>
+              <option value="receipt">Receipt</option>
+              <option value="kyc">KYC (Aadhaar / PAN / Passport)</option>
+            </select>
+          </label>
+          <button type="submit" id="submit">Process document</button>
+        </div>
+      </form>
+      <p class="status" id="status" hidden></p>
+      <section class="result" id="result" hidden></section>
+    </section>
 
-    <p class="status" id="status" hidden></p>
-    <section class="result" id="result" hidden></section>
+    <section id="panel-search" class="tab-panel" hidden>
+      <form id="search-form" class="panel search-panel">
+        <label class="field">
+          <span>Search</span>
+          <input id="search-query" type="text" placeholder="Name, or show me Ayush's last invoice" required />
+        </label>
+        <label class="field">
+          <span>Search API key</span>
+          <input id="search-api-key" type="password" autocomplete="off" placeholder="Same as SEARCH_API_KEY in .env" required />
+        </label>
+        <button type="submit" id="search-submit">Search records</button>
+        <p class="drop-hint search-hint">Looks up stored records. Aadhaar and PAN are masked in the response.</p>
+      </form>
+      <p class="status" id="search-status" hidden></p>
+      <section class="result" id="search-result" hidden></section>
+    </section>
   </div>
   <script src="/static/app.js"></script>
 </body>
