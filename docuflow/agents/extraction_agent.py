@@ -12,7 +12,7 @@ from schemas.models import Invoice, KYCDocument, Receipt
 OPENAI_CHAT_URL = "https://api.openai.com/v1/chat/completions"
 ANTHROPIC_MESSAGES_URL = "https://api.anthropic.com/v1/messages"
 GEMINI_MODEL = "gemini-3.6-flash"
-GEMINI_FALLBACK_MODELS = ("gemini-3.6-flash", "gemini-2.5-flash")
+GEMINI_FALLBACK_MODELS = ("gemini-3.6-flash",)
 OPENAI_MODEL = "gpt-4o-mini"
 ANTHROPIC_MODEL = "claude-3-5-sonnet-latest"
 ANTHROPIC_VERSION = "2023-06-01"
@@ -296,7 +296,7 @@ def _call_gemini(prompt: str) -> str:
             "https://generativelanguage.googleapis.com/v1beta/models/"
             f"{model}:generateContent"
         )
-        for attempt in range(2):
+        for attempt in range(3):
             try:
                 response = httpx.post(
                     url,
