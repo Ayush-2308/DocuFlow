@@ -56,6 +56,36 @@ def log_pipeline_error(document_id: str, error: str) -> None:
     _raise_if_error(result, "log pipeline error")
 
 
+def delete_documents(document_ids: list[str]) -> list[str]:
+    """Delete documents by id. processed_documents rows cascade from documents."""
+    ids = list(dict.fromkeys(item.strip() for item in document_ids if item and item.strip()))
+    if not ids:
+        return []
+
+    existing = (
+        supabase.table("documents").select("document_id").in_("document_id", ids).execute()
+    )
+    _raise_if_error(existing, "lookup documents for delete")
+    found = [
+        str(row.get("document_id"))
+        for row in (existing.data or [])
+        if row.get("document_id")
+    ]
+    if not found:
+        return []
+
+    errors_result = (
+        supabase.table("pipeline_errors").delete().in_("document_id", found).execute()
+    )
+    _raise_if_error(errors_result, "delete pipeline_errors")
+
+    documents_result = (
+        supabase.table("documents").delete().in_("document_id", found).execute()
+    )
+    _raise_if_error(documents_result, "delete documents")
+    return found
+
+
 def search_processed_documents(
     name: str,
     doc_type: str | None = None,

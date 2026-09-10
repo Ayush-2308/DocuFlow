@@ -2,7 +2,7 @@
 
 Multi-agent **document automation** pipeline: OCR → LLM extraction → validation → category → Supabase.
 
-Upload an invoice, receipt, or KYC PDF/image. The app returns structured fields (or sends the doc to review) and stores successful runs in the database.
+Upload an invoice, receipt, or KYC PDF/image. The app returns structured fields (or sends the doc to review) and stores successful runs in the database. A **Search** tab looks up stored names; it requires the `SEARCH_API_KEY` (UI label: **Password**) and masks Aadhaar/PAN in the JSON response.
 
 | | |
 |---|---|
@@ -16,6 +16,8 @@ Upload an invoice, receipt, or KYC PDF/image. The app returns structured fields 
 Upload → OCR (Mistral) → Extract JSON (Gemini/OpenAI/Anthropic)
       → Validate → if low confidence: needs_review
                  → else: categorize → save to Supabase
+
+Search → GET /search (X-API-Key) → ILIKE stored names → masked JSON
 ```
 
 ## Tech

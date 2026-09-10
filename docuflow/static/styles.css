@@ -159,6 +159,34 @@ button:disabled { opacity: 0.55; cursor: wait; }
   padding-top: 16px;
 }
 .search-hit:first-child { border-top: 0; margin-top: 0; padding-top: 0; }
+.search-toolbar {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 12px;
+  margin-bottom: 16px;
+}
+.search-toolbar label {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-weight: 600;
+  color: var(--muted);
+  cursor: pointer;
+}
+.search-hit-head {
+  display: flex;
+  align-items: flex-start;
+  gap: 10px;
+  margin-bottom: 12px;
+}
+.search-hit-head .meta { margin-bottom: 0; flex: 1; }
+.search-hit-check { margin-top: 8px; accent-color: var(--ink); }
+button.danger {
+  background: var(--stamp);
+  color: #fffaf3;
+}
+.search-result-list { margin: 0; }
 .meta {
   display: flex;
   flex-wrap: wrap;

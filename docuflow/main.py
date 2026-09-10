@@ -7,11 +7,12 @@ from typing import Any
 from fastapi import BackgroundTasks, Depends, FastAPI, File, Form, Header, HTTPException, UploadFile
 from fastapi.responses import FileResponse
 from fastapi.staticfiles import StaticFiles
+from pydantic import BaseModel, Field, field_validator
 
 from agents.extraction_agent import GEMINI_MODEL
 from agents.search_agent import search_identity
 from config import settings
-from db.supabase_client import log_pipeline_error
+from db.supabase_client import delete_documents, log_pipeline_error
 from graph import run_pipeline
 from schemas.models import PipelineState
 
@@ -22,6 +23,21 @@ app.mount("/static", StaticFiles(directory=STATIC_DIR), name="static")
 
 _jobs: dict[str, dict[str, Any]] = {}
 _jobs_lock = Lock()
+
+
+class DeleteDocumentsBody(BaseModel):
+    document_ids: list[str] = Field(min_length=1, max_length=50)
+
+    @field_validator("document_ids")
+    @classmethod
+    def validate_document_ids(cls, value: list[str]) -> list[str]:
+        cleaned: list[str] = []
+        for item in value:
+            try:
+                cleaned.append(str(uuid.UUID(str(item).strip())))
+            except (ValueError, AttributeError, TypeError) as exc:
+                raise ValueError("Each document_id must be a UUID") from exc
+        return list(dict.fromkeys(cleaned))
 
 
 @app.get("/", include_in_schema=False)
@@ -88,6 +104,20 @@ def search_documents(
         return search_identity(query.strip())
     except Exception as exc:
         raise HTTPException(status_code=500, detail=f"Search failed: {exc}") from exc
+
+
+@app.delete("/documents")
+def remove_documents(
+    body: DeleteDocumentsBody,
+    _: None = Depends(require_search_api_key),
+) -> dict:
+    try:
+        deleted = delete_documents(body.document_ids)
+    except Exception as exc:
+        raise HTTPException(status_code=500, detail=f"Delete failed: {exc}") from exc
+    if not deleted:
+        raise HTTPException(status_code=404, detail="No matching documents to delete")
+    return {"deleted": deleted, "count": len(deleted)}
 
 
 def _run_job(

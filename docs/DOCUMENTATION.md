@@ -1,12 +1,13 @@
 # DocuFlow — Full Documentation
 
-This document describes **what DocuFlow is**, **what was built**, **how each part works**, and **how to run / deploy it**.
+This document matches the **current** codebase: what DocuFlow is, how each part works, the HTTP API, the Upload/Search UI, and how to run or deploy it.
 
 | | |
 |---|---|
 | **Live UI** | https://docuflow-gbh3.onrender.com |
 | **Source** | https://github.com/Ayush-2308/DocuFlow |
 | **API docs (Swagger)** | `/docs` on the same host |
+| **Default branch** | `main` |
 
 ---
 
@@ -14,15 +15,21 @@ This document describes **what DocuFlow is**, **what was built**, **how each par
 
 DocuFlow is a **multi-agent document automation pipeline**, exposed as a **web app + HTTP API**.
 
+It is **not** a chatbot. Inside: specialized agents on a LangGraph. Outside: FastAPI plus a static UI with two tabs.
+
+### Upload path
+
 A user uploads a PDF or image (invoice, receipt, or KYC). The system:
 
 1. Reads text from the file (**OCR** — Mistral).
 2. Turns that text into structured JSON (**LLM extraction** — Gemini / OpenAI / Anthropic).
 3. Checks required fields, dates, totals, and ID formats (**validation** — rules).
-4. If quality is low, stops for **human review**.
+4. If quality is low, stops for **human review** (`needs_review`) and **does not** write a processed snapshot.
 5. Otherwise assigns a **category** and **saves** the record in **Supabase**.
 
-It is **not** a chat bot. Inside: specialized agents. Outside: an API and a simple upload UI.
+### Search path
+
+A user (or another app) looks up **already stored** records by person or business name. Search does **not** re-run OCR. It queries `processed_documents` and returns JSON with Aadhaar/PAN **masked only in the response**. The Search tab is gated by a **Password** field that must equal env `SEARCH_API_KEY` (sent as `X-API-Key`). Upload stays public (no that header).
 
 ---
 
@@ -30,9 +37,9 @@ It is **not** a chat bot. Inside: specialized agents. Outside: an API and a simp
 
 Manually copying vendor names, invoice totals, or Aadhaar/PAN fields from PDFs is slow and error-prone. DocuFlow automates:
 
-- ingest → extract → validate → route → store  
+ingest → extract → validate → route → store  
 
-Other apps can call the API or read Supabase instead of parsing PDFs themselves.
+Other apps can `POST /upload`, poll `GET /jobs/{job_id}`, call `GET /search`, or read Supabase instead of parsing PDFs themselves.
 
 ---
 
@@ -40,16 +47,18 @@ Other apps can call the API or read Supabase instead of parsing PDFs themselves.
 
 | Layer | Choice |
 |--------|--------|
-| Language | Python 3.12+ (Render may use 3.14) |
+| Language | Python 3.12+ (Render may pin `3.12.10` via `render.yaml`) |
 | API / UI host | FastAPI + Uvicorn |
 | Orchestration | LangGraph `StateGraph` |
 | Schemas | Pydantic v2 |
 | OCR | Mistral OCR HTTP API |
 | Extraction LLM | Configurable: `gemini`, `openai`, `anthropic` |
-| Database | Supabase (Postgres) |
+| Gemini model | **`gemini-3.6-flash` only** (older `gemini-2.5-flash` 404s for new keys) |
+| Database | Supabase (Postgres + JSONB) |
 | Frontend | Static HTML / CSS / JS (no React build) |
-| Config | `python-dotenv` + environment variables |
+| Config | `python-dotenv` + required environment variables |
 | HTTP clients | `httpx` |
+| Tests | `unittest` for response masking (`docuflow/tests/test_sanitize.py`) |
 
 ---
 
@@ -57,16 +66,16 @@ Other apps can call the API or read Supabase instead of parsing PDFs themselves.
 
 ```
 DocuFlow/
-├── README.md                 # Short project overview (GitHub homepage)
+├── README.md                 # Short GitHub overview
 ├── docs/DOCUMENTATION.md     # This file
-├── render.yaml               # Render deploy hints
+├── render.yaml               # Render: rootDir docuflow, pip + uvicorn
 ├── .gitignore                # Ignores .env, venv, caches
 └── docuflow/                 # Application root (run uvicorn from here)
-    ├── main.py               # FastAPI app, jobs, static UI
+    ├── main.py               # FastAPI: UI, jobs, search auth
     ├── graph.py              # LangGraph pipeline
-    ├── config.py             # Loads required env vars
+    ├── config.py             # Loads required env vars (fails if any missing)
     ├── requirements.txt
-    ├── Procfile
+    ├── Procfile              # web: uvicorn main:app --host 0.0.0.0 --port $PORT
     ├── .env.example          # Placeholder keys (commit this, never .env)
     ├── schemas/
     │   └── models.py         # Invoice, Receipt, KYC, PipelineState
@@ -74,42 +83,72 @@ DocuFlow/
     │   ├── ocr_agent.py
     │   ├── extraction_agent.py
     │   ├── validation_agent.py
-    │   └── categorization_agent.py
+    │   ├── categorization_agent.py
+    │   └── search_agent.py   # NL intent + identity lookup
     ├── db/
     │   ├── supabase_client.py
     │   └── migrations.sql
-    └── static/               # Upload UI
-        ├── index.html
+    ├── utils/
+    │   └── sanitize.py       # Aadhaar/PAN mask on search responses
+    ├── tests/
+    │   └── test_sanitize.py
+    └── static/
+        ├── index.html        # Upload | Search tabs
         ├── styles.css
         └── app.js
 ```
 
-**Secrets:** `docuflow/.env` is gitignored. Only `.env.example` is on GitHub.
+**Secrets:** `docuflow/.env` is gitignored. Only `.env.example` is on GitHub. Never commit real keys.
 
 ---
 
-## 5. End-to-end flow (user → result)
+## 5. End-to-end flows
+
+### 5.1 Upload (browser or API)
 
 ```
-Browser UI  ──POST /upload (file + doc_type_hint)──► FastAPI
-                                                      │
-                                                      ├─ save temp file
-                                                      ├─ return { job_id, status: processing }   ◄── HTTP ends quickly
-                                                      │
-                                                      └─ background thread: run_pipeline()
-                                                                │
-                         LangGraph: intake → ocr → extraction → validation
-                                                                │
-                                    score < 0.75 or errors? ────┤
-                                    yes → needs_review → END    │
-                                    no  → categorize → storage (Supabase) → END
-                                                                │
-Browser polls GET /jobs/{job_id} every 2s until done | error
-                                                                │
-UI renders status, category, confidence, extracted fields
+Browser UI (Upload tab)
+  POST /upload (multipart: file + doc_type_hint)
+        │
+        ├─ save temp file
+        ├─ return { job_id, status: "processing" }   ◄── HTTP ends quickly
+        │
+        └─ background task: run_pipeline()
+                  │
+   LangGraph: intake → ocr → extraction → validation
+                  │
+                  score < 0.75 or errors? ────┤
+                  yes → needs_review → END    │
+                  no  → categorize → storage (Supabase) → END
+                  │
+Browser polls GET /jobs/{job_id} every 2s (up to 5 minutes)
+                  │
+UI shows status, category, confidence, extracted fields
 ```
 
-**Why background jobs?** Hosts like Render close long HTTP requests (~30–100s). OCR + LLM often take longer. Upload returns immediately; the UI polls until the pipeline finishes (up to 5 minutes).
+**Why background jobs?** Hosts like Render close long HTTP requests (~30–100s). OCR + LLM often take longer. Upload returns immediately; the client polls until `done` or `error`.
+
+Jobs are stored **in process memory**. A Render restart or new deploy drops in-flight `job_id`s.
+
+### 5.2 Search (browser or API)
+
+```
+Browser UI (Search tab)
+  query text + Password
+        │
+  GET /search?query=...
+  Header: X-API-Key: <same value as SEARCH_API_KEY>
+        │
+  401 if missing/wrong key
+        │
+  parse_search_intent (plain name skips LLM; phrases use LLM)
+        │
+  search_processed_documents (ILIKE on JSONB name fields)
+        │
+  sanitize_response (Aadhaar/PAN masked; DB unchanged)
+        │
+  JSON { query, results: [{ document_type, document_id, data }] }
+```
 
 ---
 
@@ -120,7 +159,7 @@ Shared state for every graph node (`schemas/models.py`):
 | Field | Meaning |
 |--------|---------|
 | `document_id` | UUID for this run |
-| `file_path` | Temp path of the uploaded file |
+| `file_path` | Temp path of the uploaded file (deleted after the job) |
 | `doc_type_hint` | `invoice` / `receipt` / `kyc` |
 | `raw_text` | OCR output |
 | `extracted_data` | Validated JSON dict |
@@ -129,14 +168,28 @@ Shared state for every graph node (`schemas/models.py`):
 | `category` | e.g. Travel Expense, Identity Verification |
 | `status` | `pending` → `intake` → `ocr` → `extracted` → `validated` → `categorized` / `needs_review` / `stored` |
 
+### 6.1 Document schemas
+
+**Invoice:** `vendor_name`, `invoice_number`, `date`, `line_items[]` (`description`, `quantity`, `unit_price`, `amount`), `subtotal`, `tax`, `total_amount`. Line amount must equal `quantity * unit_price`; subtotal must equal line sum; total must equal subtotal + tax (0.01 tolerance in Pydantic; validation agent uses 0.05 on totals).
+
+**Receipt:** `merchant_name`, `date`, `items[]` (`description`, `amount`), `total_amount` equal to item sum.
+
+**KYC:** `full_name`, `document_type` (`Aadhaar` / `PAN` / `Passport`), `id_number`, `date_of_birth`, `address`.
+
+- Aadhaar: 12 digits (spaces allowed on input, stored normalized).
+- PAN: `ABCDE1234F` (5 letters, 4 digits, 1 letter).
+- Passport: `A1234567` (1 letter + 7 digits).
+
+Dates accept ISO and common `DD/MM/YYYY`-style strings.
+
 ---
 
-## 7. Agents — what each one does
+## 7. Agents
 
 ### 7.1 OCR (`agents/ocr_agent.py`)
 
 - **Input:** local file path  
-- **Output:** extracted text (markdown from pages joined)  
+- **Output:** extracted text (page markdown joined)  
 - **How:** Base64 data URL to Mistral `POST {OCR_ENDPOINT}` (`https://api.mistral.ai/v1/ocr`)  
 - PDFs → `document_url` + `application/pdf`  
 - Images → `image_url` + MIME from extension (png, jpg, webp, …)  
@@ -146,13 +199,13 @@ Shared state for every graph node (`schemas/models.py`):
 
 - **Input:** `raw_text`, `doc_type_hint`  
 - **Output:** dict matching `Invoice`, `Receipt`, or `KYCDocument`  
-- **How:** Builds a prompt with the Pydantic JSON schema; LLM must return JSON only  
+- **How:** Prompt includes the Pydantic JSON schema; model must return JSON only  
 - Parses JSON (strips markdown fences); `model_validate`  
 - If invalid, **one correction prompt** with the error, then retry  
 - **Providers** (`LLM_PROVIDER`):
-  - `openai` — Chat Completions  
-  - `anthropic` — Messages API  
-  - `gemini` / `google` — `generateContent`; retries on 429/503; fallback models `gemini-3.6-flash` then `gemini-2.5-flash`
+  - `openai` — Chat Completions (`gpt-4o-mini`)
+  - `anthropic` — Messages API (`claude-3-5-sonnet-latest`)
+  - `gemini` / `google` — `generateContent` on **`gemini-3.6-flash`**; retries on 429/503
 
 ### 7.3 Validation (`agents/validation_agent.py`)
 
@@ -162,33 +215,42 @@ Shared state for every graph node (`schemas/models.py`):
   - Required fields present  
   - Dates parse and are not in the future  
   - Invoices: line amounts vs subtotal / tax / total (tolerance `0.05`)  
-  - KYC `id_number`: Aadhaar 12 digits, PAN `ABCDE1234F`, Passport `A1234567`  
+  - KYC `id_number`: Aadhaar 12 digits, PAN pattern, Passport pattern  
 - Confidence ≈ `1 - failed_checks / total_checks`
 
 ### 7.4 Categorization (`agents/categorization_agent.py`)
 
 - Keyword match on vendor/merchant name and item descriptions  
 - KYC always → `Identity Verification`  
-- Else Travel, Office Supplies, Meals, Software, or `Uncategorized`  
-- TODO in code: replace with an LLM later  
+- Else Travel Expense, Office Supplies, Meals & Entertainment, Software, or `Uncategorized`  
+- Code still has a TODO to replace this with an LLM later  
 
-### 7.5 Storage (`db/supabase_client.py`)
+### 7.5 Search (`agents/search_agent.py`)
+
+Not part of the LangGraph upload pipeline. Used only by `GET /search`.
+
+- **`parse_search_intent`:** a short name (≤ 4 words, no cues like “show”, “last”, “invoice”) is used as-is. Longer / NL phrases call the same LLM helper as extraction and expect `{name, doc_type, latest}`. LLM failure → treat the full string as `name`.
+- **`search_identity`:** queries Supabase, optionally keeps only the newest row if `latest` is true, sorts results KYC → invoice → receipt, applies `sanitize_response`.
+
+### 7.6 Storage (`db/supabase_client.py`)
 
 - `insert_document` — upsert `documents`, insert `processed_documents`  
 - `update_document_status` — set `documents.status`  
 - `log_pipeline_error` — append to `pipeline_errors`  
+- `search_processed_documents` — ILIKE on `extracted_data->>full_name`, `vendor_name`, `merchant_name`; optional `doc_type_hint` filter; `%` `_` and similar stripped from the needle  
+- `delete_documents` — looks up ids, deletes matching `pipeline_errors` and `documents` (`processed_documents` cascade) 
 
-Called from the **storage** graph node. Failures during the job also try `log_pipeline_error`.
+Called from the **storage** graph node. Job exceptions also try `log_pipeline_error`.
 
 ---
 
 ## 8. LangGraph (`graph.py`)
 
-Nodes in order:
+Nodes:
 
 `intake` → `ocr` → `extraction` → `validation` → **branch**
 
-- If `validation_errors` is non-empty **or** `confidence_score < 0.75` (or score is `None`) → `needs_review` → END (no category, no Supabase insert).  
+- If `validation_errors` is non-empty **or** `confidence_score < 0.75` (or score is `None`) → `needs_review` → END (no category, no Supabase processed insert).  
 - Else → `categorization` → `storage` → END  
 
 `run_pipeline(file_path, doc_type_hint, document_id=None)` builds initial `PipelineState` and `invoke`s the compiled graph.
@@ -197,30 +259,32 @@ Nodes in order:
 
 ## 9. HTTP API (`main.py`)
 
-| Method | Path | Purpose |
-|--------|------|---------|
-| `GET` | `/` | Upload UI |
-| `GET` | `/static/*` | CSS/JS |
-| `GET` | `/health` | Provider + Gemini model name |
-| `GET` | `/docs` | Swagger (FastAPI built-in) |
-| `POST` | `/upload` | Multipart `file` + optional `doc_type_hint` → `{ job_id, status: "processing" }` |
-| `GET` | `/jobs/{job_id}` | `{ status: processing }` or `{ status: done, result: PipelineState }` or `{ status: error, error: "..." }` |
-| `GET` | `/search?query=` | Identity search over stored `extracted_data` (**requires `X-API-Key`**) |
+| Method | Path | Auth | Purpose |
+|--------|------|------|---------|
+| `GET` | `/` | none | Static UI (`index.html`) |
+| `GET` | `/static/*` | none | CSS / JS |
+| `GET` | `/health` | none | `{ ok, llm_provider, gemini_model }` |
+| `GET` | `/docs` | none | Swagger |
+| `POST` | `/upload` | none | Multipart `file` + `doc_type_hint` → `{ job_id, status: "processing" }` |
+| `GET` | `/jobs/{job_id}` | none | `processing` / `{ status: done, result }` / `{ status: error, error }` |
+| `GET` | `/search?query=` | **`X-API-Key`** | Identity search over stored `extracted_data` |
+| `DELETE` | `/documents` | **`X-API-Key`** | Body `{ "document_ids": ["uuid", ...] }` (1–50 UUIDs) → `{ deleted, count }` |
 
-`doc_type_hint` values: `invoice`, `receipt`, `kyc` (case-insensitive in agents).
+`doc_type_hint` values: `invoice`, `receipt`, `kyc` (agents treat related aliases as KYC). Empty upload body → **400**.
 
-### 9.1 Identity search
+### 9.1 Identity search details
 
-`GET /search?query={text}` looks up **already stored** rows in `processed_documents` (not the live PDF). It does a case-insensitive partial match on JSONB fields `full_name`, `vendor_name`, and `merchant_name`.
+`GET /search?query={text}` looks up **stored** rows only.
 
-**Auth:** header `X-API-Key` must equal env `SEARCH_API_KEY`. Missing or wrong key → **401**. `/upload` stays open without this key.
+**Auth:** header `X-API-Key` must equal env `SEARCH_API_KEY`. Missing or wrong → **401** `Invalid or missing API key`. Empty query → **400**. Downstream errors → **500**.
 
-**Natural language:** a short name like `Ayush` is used as-is. Phrases such as `show me Ayush's last invoice` are parsed with the configured `LLM_PROVIDER` into `{name, doc_type, latest}` and then turned into a Supabase filter. If the LLM fails, the full string is treated as the name.
-
-**Masking:** `utils/sanitize.py` → `sanitize_response()`. Applied only on the **API response**, never written back to the database.
+**Masking:** `utils/sanitize.py` → `sanitize_response()`. **Response only**; database rows stay full.
 
 - Aadhaar `id_number`: `XXXX-XXXX-` + last 4 digits  
-- PAN `id_number`: first 5 characters replaced with `X` (e.g. `ABCDE1234F` → `XXXXX1234F`)
+- PAN `id_number`: first 5 characters → `X` (e.g. `ABCDE1234F` → `XXXXX1234F`)  
+- Also masks string fields whose keys look like Aadhaar/PAN  
+
+Passport numbers are **not** specially masked.
 
 **Example**
 
@@ -247,7 +311,25 @@ X-API-Key: <SEARCH_API_KEY>
 }
 ```
 
-Results are ordered KYC, then invoice, then receipt. `latest: true` keeps only the newest matching row.
+**Delete selected records** (same `X-API-Key` as search):
+
+```http
+DELETE /documents
+X-API-Key: <SEARCH_API_KEY>
+Content-Type: application/json
+
+{ "document_ids": ["<uuid>"] }
+```
+
+**curl upload then poll**
+
+```bash
+curl -X POST "http://127.0.0.1:8000/upload" \
+  -F "file=@./sample-invoice.pdf" \
+  -F "doc_type_hint=invoice"
+
+curl "http://127.0.0.1:8000/jobs/<job_id>"
+```
 
 ---
 
@@ -255,24 +337,45 @@ Results are ordered KYC, then invoice, then receipt. `latest: true` keeps only t
 
 Run once in the Supabase SQL editor.
 
-- **documents** — id, path, type hint, status  
-- **processed_documents** — full snapshot including `extracted_data` JSONB  
-- **pipeline_errors** — error strings per `document_id`  
+| Table | Role |
+|--------|------|
+| `documents` | `document_id` PK, path, type hint, status, timestamps |
+| `processed_documents` | Full snapshot including JSONB `extracted_data`, confidence, errors, category |
+| `pipeline_errors` | Error strings per `document_id` |
+
+Indexes on `processed_documents.document_id` and `pipeline_errors.document_id`.
+
+Search needs `extracted_data` JSON keys `full_name`, `vendor_name`, and/or `merchant_name` depending on document type.
 
 ---
 
 ## 11. Frontend (`static/`)
 
-- Drag-and-drop or file picker  
-- Document type dropdown  
-- `POST /upload` then poll `/jobs/{id}` every 2 seconds  
-- Shows chips (status, category, confidence), extracted fields, validation errors, collapsible OCR text and raw JSON  
+Two tabs: **Upload** and **Search**. Paper/cream layout (Fraunces + Source Sans 3).
+
+### Upload
+
+- Drag-and-drop or file picker (PDF, PNG, JPG)  
+- Document type dropdown (required)  
+- `POST /upload` then poll `/jobs/{id}` every 2 seconds, timeout 5 minutes  
+- Chips: status, category, confidence; extracted fields; validation errors; collapsible OCR text and full JSON  
+
+**Note:** the upload result panel shows extraction JSON as returned by the job. Masking is applied on **search** responses, not on this upload result view.
+
+### Search
+
+- **Search** — name or a phrase like `show me Ayush's last invoice`  
+- **Password** — must be the server’s `SEARCH_API_KEY` (not a user account password). The UI label is “Password” so the page does not advertise “API key”. The value is **not** prefilled; without it, search returns 401.  
+- Browser stores the last typed password in `sessionStorage` (`docuflowSearchKey`) for that tab session only  
+- `GET /search?query=...` with header `X-API-Key`  
+- Renders each hit as type + `document_id` + field list  
+- **Select all** / per-row checkboxes + **Delete selected** (confirm, then `DELETE /documents` with the same password; list refreshes) 
 
 ---
 
 ## 12. Environment variables
 
-Copy `docuflow/.env.example` → `docuflow/.env` locally. On Render, set the same names in **Environment**.
+Copy `docuflow/.env.example` → `docuflow/.env` locally. On Render, set the **same names** under Environment.
 
 | Variable | Role |
 |----------|------|
@@ -283,9 +386,11 @@ Copy `docuflow/.env.example` → `docuflow/.env` locally. On Render, set the sam
 | `OCR_PROVIDER` | `mistral` |
 | `LLM_API_KEY` | Gemini / OpenAI / Anthropic key |
 | `LLM_PROVIDER` | `gemini` \| `openai` \| `anthropic` |
-| `SEARCH_API_KEY` | Shared secret for `GET /search` (`X-API-Key` header) |
+| `SEARCH_API_KEY` | Shared secret for `GET /search` and the UI Password field |
 
-`config.py` **fails at import** if any are missing (that is why Render crashed before env vars were added).
+`config.py` **raises at import** if any are missing. A hosted app with incomplete env will crash on boot (`Missing required environment variable: …`).
+
+Pick a long random `SEARCH_API_KEY`. Do not commit it. Rotate any key that was pasted in chat or screenshots.
 
 ---
 
@@ -295,42 +400,63 @@ Copy `docuflow/.env.example` → `docuflow/.env` locally. On Render, set the sam
 cd docuflow
 python -m venv .venv
 .venv\Scripts\activate          # Windows
+# source .venv/bin/activate     # macOS / Linux
 pip install -r requirements.txt
 copy .env.example .env          # then fill real keys
-# Run migrations.sql in Supabase
+```
+
+1. Run `db/migrations.sql` in the Supabase SQL editor.  
+2. Start the app from **`docuflow/`**:
+
+```bash
 uvicorn main:app --reload --host 127.0.0.1 --port 8000
 ```
 
-Open http://127.0.0.1:8000 (UI) and http://127.0.0.1:8000/docs (API).
+3. UI: http://127.0.0.1:8000  
+4. Swagger: http://127.0.0.1:8000/docs  
+
+Sanitize tests (from `docuflow/`):
+
+```bash
+python -m unittest tests.test_sanitize
+```
 
 ---
 
 ## 14. Deploy (Render)
 
-1. Connect GitHub repo `Ayush-2308/DocuFlow`.  
+1. Connect GitHub `Ayush-2308/DocuFlow`.  
 2. **Root Directory:** `docuflow`  
 3. **Build:** `pip install -r requirements.txt`  
 4. **Start:** `uvicorn main:app --host 0.0.0.0 --port $PORT`  
-5. Add all env vars from section 12.  
+5. Set **all** variables in section 12, including `SEARCH_API_KEY`.  
 6. Auto-deploy on push to `main`.
 
-Free tier: first request can be slow (cold start). Keep the tab open while a job runs.
+Free tier: first request can be slow (cold start). Keep the tab open while an upload job runs.
 
 ---
 
-## 15. Example (invoice)
+## 15. Worked examples
+
+### Invoice
 
 User uploads `hotel-bill.pdf`, type **Invoice**.
 
 1. OCR text includes vendor, line items, tax, total.  
 2. LLM fills `Invoice` JSON.  
 3. Validation checks `subtotal + tax ≈ total`.  
-4. If OK → category e.g. **Travel Expense** (keyword “hotel”) → row in Supabase `status=stored`.  
-5. If totals mismatch → `needs_review`, nothing stored in `processed_documents`.
+4. If OK → category e.g. **Travel Expense** (keyword “hotel”) → `processed_documents` with `status=stored`.  
+5. If totals mismatch → `needs_review`; nothing stored in `processed_documents`.
+
+### KYC then search
+
+1. Upload Aadhaar image, type **KYC**, wait until status `stored`.  
+2. Search tab: query `full_name` (or a short name), Password = `SEARCH_API_KEY`.  
+3. Response `id_number` looks like `XXXX-XXXX-0123`. The row in Supabase still has the full number.
 
 ---
 
-## 16. What was built (feature list)
+## 16. Feature list (what is built)
 
 - Pydantic models for Invoice, Receipt, KYC + date/ID validators  
 - Mistral OCR agent (PDF + images)  
@@ -339,24 +465,28 @@ User uploads `hotel-bill.pdf`, type **Invoice**.
 - Keyword categorization  
 - LangGraph orchestration + review branch  
 - Supabase persist + error log  
-- FastAPI + static UI  
+- FastAPI + static UI with **Upload** and **Search** tabs  
 - Async jobs so hosted HTTP does not time out  
-- Gemini 503 retries / model fallback  
-- Identity search (`GET /search`) with Aadhaar/PAN response masking and `X-API-Key`  
+- Gemini 429/503 retries; extraction model **`gemini-3.6-flash` only**  
+- Identity search (`GET /search`) with NL intent, ILIKE name match, Aadhaar/PAN response masking, `X-API-Key`  
+- Select-and-delete stored documents (`DELETE /documents`) from the Search tab  
+- UI Password field (not prefilled) mapped to that header  
 
 ---
 
 ## 17. Limitations (honest)
 
-- `doc_type_hint` is required for correct schema (no auto-detect yet).  
+- `doc_type_hint` is required for the correct schema (no auto-detect).  
 - Categorization is keywords, not LLM.  
-- Job status lives **in memory**; a new Render deploy loses in-flight jobs.  
-- `needs_review` does not write a processed snapshot (by design).  
-- API keys must never be committed; rotate any key that was pasted in chat.  
-- LLM/OCR outages (503, quota) still fail the job after retries.
+- Job status lives **in memory**; deploys lose in-flight jobs.  
+- `needs_review` does not write a processed snapshot (by design), so those docs are **not** searchable.  
+- Upload result UI can still show full `id_number`; masking is search-response only.  
+- Search Password in the browser is a shared env secret, not per-user auth. Anyone who knows it can query stored names.  
+- Gemini/OCR outages or quota still fail the job after retries.  
+- API keys must never be committed.
 
 ---
 
 ## 18. Interview one-liner
 
-> I built a LangGraph document pipeline: Mistral OCR, LLM JSON extraction against Pydantic schemas, rule validation with a review gate, then Supabase storage. FastAPI exposes an upload UI and job polling so other apps can integrate.
+> I built a LangGraph document pipeline: Mistral OCR, LLM JSON extraction against Pydantic schemas, rule validation with a review gate, then Supabase storage. FastAPI exposes an upload UI with job polling plus a password-gated identity search that masks Aadhaar and PAN on the way out so other apps can integrate without parsing PDFs themselves.

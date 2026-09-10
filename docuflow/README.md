@@ -19,7 +19,7 @@ Client
         |
         +-- intake
         +-- ocr              -> Mistral OCR (agents/ocr_agent.py)
-        +-- extraction       -> OpenAI / Anthropic JSON extract (agents/extraction_agent.py)
+        +-- extraction       -> Gemini / OpenAI / Anthropic JSON extract (agents/extraction_agent.py)
         +-- validation       -> rule checks + confidence (agents/validation_agent.py)
         |
         +-- if confidence < 0.75 or validation_errors
@@ -27,6 +27,9 @@ Client
         |
         +-- categorization   -> keyword rules (agents/categorization_agent.py)
         +-- storage          -> Supabase documents + processed_documents
+
+Search is separate from the graph:
+  GET /search + X-API-Key -> search_agent -> processed_documents ILIKE -> sanitize
 ```
 
 Failed pipeline runs are written to `pipeline_errors` via `log_pipeline_error`.
@@ -61,6 +64,7 @@ Required values:
 - `SUPABASE_URL`, `SUPABASE_KEY`
 - `OCR_API_KEY`, `OCR_ENDPOINT`, `OCR_PROVIDER`
 - `LLM_API_KEY`, `LLM_PROVIDER` (`openai`, `anthropic`, or `gemini`)
+- `SEARCH_API_KEY` (header `X-API-Key` on `GET /search`; Search tab **Password** field)
 
 4. Apply the schema in the Supabase SQL editor:
 
@@ -76,7 +80,7 @@ From the `docuflow/` directory:
 uvicorn main:app --reload --host 0.0.0.0 --port 8000
 ```
 
-Open the upload UI at http://127.0.0.1:8000  
+Open the UI at http://127.0.0.1:8000 (Upload and Search tabs)  
 API docs stay at http://127.0.0.1:8000/docs
 
 ## Example: upload a document

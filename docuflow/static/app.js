@@ -19,6 +19,8 @@ const searchResult = document.getElementById("search-result");
 const savedKey = sessionStorage.getItem("docuflowSearchKey");
 if (savedKey && searchKey) searchKey.value = savedKey;
 
+let lastSearchQuery = "";
+
 function showTab(name) {
   const upload = name === "upload";
   tabUpload.classList.toggle("is-active", upload);
@@ -106,6 +108,7 @@ searchForm.addEventListener("submit", async (event) => {
     if (!response.ok) {
       throw new Error(payload.detail || "Search failed");
     }
+    lastSearchQuery = query;
     searchStatus.textContent = payload.results?.length
       ? `Found ${payload.results.length} record(s).`
       : "No matching records.";
@@ -137,6 +140,83 @@ async function pollJob(jobId) {
   throw new Error("Timed out after 5 minutes. Try again in a bit.");
 }
 
+function selectedDocumentIds() {
+  return [...searchResult.querySelectorAll(".hit-select:checked")]
+    .map((input) => input.value)
+    .filter(Boolean);
+}
+
+function syncDeleteButton() {
+  const button = document.getElementById("delete-selected");
+  const selectAll = document.getElementById("select-all-hits");
+  if (!button) return;
+  const boxes = [...searchResult.querySelectorAll(".hit-select")];
+  const chosen = selectedDocumentIds();
+  button.disabled = chosen.length === 0;
+  button.textContent =
+    chosen.length > 0 ? `Delete selected (${chosen.length})` : "Delete selected";
+  if (selectAll) {
+    selectAll.checked = boxes.length > 0 && chosen.length === boxes.length;
+    selectAll.indeterminate = chosen.length > 0 && chosen.length < boxes.length;
+  }
+}
+
+searchResult.addEventListener("change", (event) => {
+  const target = event.target;
+  if (!(target instanceof HTMLInputElement)) return;
+  if (target.id === "select-all-hits") {
+    searchResult.querySelectorAll(".hit-select").forEach((box) => {
+      box.checked = target.checked;
+    });
+  }
+  if (target.id === "select-all-hits" || target.classList.contains("hit-select")) {
+    syncDeleteButton();
+  }
+});
+
+searchResult.addEventListener("click", async (event) => {
+  const button = event.target.closest("#delete-selected");
+  if (!button) return;
+  const ids = selectedDocumentIds();
+  const apiKey = searchKey.value.trim();
+  if (!ids.length || !apiKey) return;
+  if (!window.confirm(`Delete ${ids.length} selected document(s)? This cannot be undone.`)) {
+    return;
+  }
+
+  button.disabled = true;
+  searchStatus.hidden = false;
+  searchStatus.textContent = "Deleting selected records…";
+  try {
+    const response = await fetch("/documents", {
+      method: "DELETE",
+      headers: {
+        "Content-Type": "application/json",
+        "X-API-Key": apiKey,
+      },
+      body: JSON.stringify({ document_ids: ids }),
+    });
+    const payload = await response.json();
+    if (!response.ok) {
+      throw new Error(payload.detail || "Delete failed");
+    }
+    searchStatus.textContent = `Deleted ${payload.count} record(s).`;
+    if (lastSearchQuery) {
+      const refresh = await fetch(`/search?query=${encodeURIComponent(lastSearchQuery)}`, {
+        headers: { "X-API-Key": apiKey },
+      });
+      const refreshed = await refresh.json();
+      if (!refresh.ok) {
+        throw new Error(refreshed.detail || "Search refresh failed");
+      }
+      renderSearchResults(refreshed);
+    }
+  } catch (error) {
+    searchStatus.textContent = error.message || "Delete failed.";
+    syncDeleteButton();
+  }
+});
+
 function renderSearchResults(payload) {
   const hits = payload.results || [];
   searchResult.hidden = false;
@@ -144,9 +224,10 @@ function renderSearchResults(payload) {
     searchResult.innerHTML = "<p>No stored documents matched that query.</p>";
     return;
   }
-  searchResult.innerHTML = hits
+  const cards = hits
     .map((hit) => {
       const data = hit.data || {};
+      const id = String(hit.document_id || "");
       const rows = Object.entries(data)
         .map(([key, value]) => {
           const shown =
@@ -156,14 +237,26 @@ function renderSearchResults(payload) {
         .join("");
       return `
         <article class="search-hit">
-          <div class="meta">
-            <span class="chip">${escapeHtml(hit.document_type || "unknown")}</span>
-            <span class="chip">${escapeHtml(hit.document_id || "")}</span>
+          <div class="search-hit-head">
+            <input class="search-hit-check hit-select" type="checkbox" value="${escapeHtml(id)}" aria-label="Select document ${escapeHtml(id)}" />
+            <div class="meta">
+              <span class="chip">${escapeHtml(hit.document_type || "unknown")}</span>
+              <span class="chip">${escapeHtml(id)}</span>
+            </div>
           </div>
           <dl>${rows}</dl>
         </article>`;
     })
     .join("");
+  searchResult.innerHTML = `
+    <div class="search-toolbar">
+      <label>
+        <input id="select-all-hits" type="checkbox" />
+        Select all
+      </label>
+      <button type="button" class="danger" id="delete-selected" disabled>Delete selected</button>
+    </div>
+    <div class="search-result-list">${cards}</div>`;
 }
 
 function renderResult(target, data) {
