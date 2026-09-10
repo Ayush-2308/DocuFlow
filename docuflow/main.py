@@ -4,10 +4,11 @@ from tempfile import NamedTemporaryFile
 from threading import Lock
 from typing import Any
 
-from fastapi import BackgroundTasks, Depends, FastAPI, File, Form, Header, HTTPException, UploadFile
+from fastapi import BackgroundTasks, Depends, FastAPI, File, Form, Header, HTTPException, Request, UploadFile
 from fastapi.responses import FileResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, Field, field_validator
+from starlette.middleware.base import BaseHTTPMiddleware
 
 from agents.extraction_agent import GEMINI_MODEL
 from agents.search_agent import search_identity
@@ -20,6 +21,18 @@ STATIC_DIR = Path(__file__).resolve().parent / "static"
 
 app = FastAPI(title="DocuFlow", version="0.1.0")
 app.mount("/static", StaticFiles(directory=STATIC_DIR), name="static")
+
+
+class _NoCacheStatic(BaseHTTPMiddleware):
+    async def dispatch(self, request: Request, call_next):
+        response = await call_next(request)
+        path = request.url.path
+        if path == "/" or path.startswith("/static/"):
+            response.headers["Cache-Control"] = "no-store, max-age=0"
+        return response
+
+
+app.add_middleware(_NoCacheStatic)
 
 _jobs: dict[str, dict[str, Any]] = {}
 _jobs_lock = Lock()

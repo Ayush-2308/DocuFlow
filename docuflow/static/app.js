@@ -238,7 +238,10 @@ function renderSearchResults(payload) {
       return `
         <article class="search-hit">
           <div class="search-hit-head">
-            <input class="search-hit-check hit-select" type="checkbox" value="${escapeHtml(id)}" aria-label="Select document ${escapeHtml(id)}" />
+            <label class="search-select-label">
+              <input class="search-hit-check hit-select" type="checkbox" value="${escapeHtml(id)}" />
+              Select
+            </label>
             <div class="meta">
               <span class="chip">${escapeHtml(hit.document_type || "unknown")}</span>
               <span class="chip">${escapeHtml(id)}</span>
