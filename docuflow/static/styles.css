@@ -250,6 +250,42 @@ pre {
 details { margin-bottom: 16px; }
 summary { cursor: pointer; color: var(--muted); font-weight: 600; }
 
+.delete-panel {
+  margin-top: 28px;
+}
+.delete-panel .lede {
+  margin-bottom: 16px;
+  font-size: 0.98rem;
+}
+.doc-list {
+  margin-top: 18px;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+.doc-row {
+  display: grid;
+  grid-template-columns: 1fr auto;
+  gap: 12px;
+  align-items: center;
+  padding: 12px 14px;
+  border: 1px solid var(--line);
+  border-radius: 12px;
+  background: #fbf7f0;
+}
+.doc-row strong { display: block; }
+.doc-row small {
+  color: var(--muted);
+  word-break: break-all;
+}
+button.danger {
+  background: var(--stamp);
+}
+button.small {
+  padding: 8px 14px;
+  font-size: 0.9rem;
+}
+
 @media (max-width: 640px) {
   .row, dl { grid-template-columns: 1fr; }
   button { width: 100%; }

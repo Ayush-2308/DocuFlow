@@ -286,6 +286,11 @@ function renderResult(target, data) {
       <span class="chip">${escapeHtml(data.category || "Uncategorized")}</span>
       <span class="chip">confidence ${score == null ? "—" : Number(score).toFixed(2)}</span>
     </div>
+    ${
+      data.document_id
+        ? `<p class="lede">Document ID: <code>${escapeHtml(data.document_id)}</code></p>`
+        : ""
+    }
     <h2>Extracted fields</h2>
     <dl>${rows || "<dt>None</dt><dd>No structured fields returned.</dd>"}</dl>
     ${errors ? `<h2>Validation</h2><ul class="errors">${errors}</ul>` : ""}
@@ -307,3 +312,75 @@ function escapeHtml(value) {
     .replaceAll(">", "&gt;")
     .replaceAll('"', "&quot;");
 }
+
+deleteForm.addEventListener("submit", async (event) => {
+  event.preventDefault();
+  const documentId = deleteIdInput.value.trim();
+  if (!documentId) return;
+  await deleteDocument(documentId);
+});
+
+docListEl.addEventListener("click", async (event) => {
+  const button = event.target.closest("[data-delete-id]");
+  if (!button) return;
+  await deleteDocument(button.getAttribute("data-delete-id"));
+});
+
+async function deleteDocument(documentId) {
+  const confirmed = window.confirm(
+    "Delete this document from the database? This cannot be undone."
+  );
+  if (!confirmed) return;
+
+  deleteSubmit.disabled = true;
+  deleteStatusEl.hidden = false;
+  deleteStatusEl.textContent = "Deleting from database…";
+  try {
+    const response = await fetch(`/documents/${encodeURIComponent(documentId)}`, {
+      method: "DELETE",
+    });
+    const payload = await response.json().catch(() => ({}));
+    if (!response.ok) {
+      throw new Error(payload.detail || "Delete failed");
+    }
+    deleteIdInput.value = "";
+    deleteStatusEl.textContent = "Deleted from the database.";
+    await loadDocuments();
+  } catch (error) {
+    deleteStatusEl.textContent = error.message || "Could not delete the document.";
+  } finally {
+    deleteSubmit.disabled = false;
+  }
+}
+
+async function loadDocuments() {
+  try {
+    const response = await fetch("/documents");
+    const payload = await response.json();
+    if (!response.ok) {
+      throw new Error(payload.detail || "Could not load documents");
+    }
+    const docs = payload.documents || [];
+    if (!docs.length) {
+      docListEl.innerHTML = "<p class=\"lede\">No stored documents yet.</p>";
+      return;
+    }
+    docListEl.innerHTML = docs
+      .map((doc) => {
+        const type = doc.document_type || "unknown";
+        const label = doc.label || "Untitled";
+        return `<div class="doc-row">
+          <div>
+            <strong>${escapeHtml(label)}</strong>
+            <small>${escapeHtml(type)} · ${escapeHtml(doc.document_id || "")}</small>
+          </div>
+          <button type="button" class="danger small" data-delete-id="${escapeHtml(doc.document_id || "")}">Delete</button>
+        </div>`;
+      })
+      .join("");
+  } catch (error) {
+    docListEl.innerHTML = `<p class="lede">${escapeHtml(error.message || "Could not load documents.")}</p>`;
+  }
+}
+
+loadDocuments();

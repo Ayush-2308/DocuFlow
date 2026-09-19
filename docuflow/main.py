@@ -13,7 +13,7 @@ from starlette.middleware.base import BaseHTTPMiddleware
 from agents.extraction_agent import GEMINI_MODEL
 from agents.search_agent import search_identity
 from config import settings
-from db.supabase_client import delete_documents, log_pipeline_error
+from db.supabase_client import delete_documents, log_pipeline_error, storage_backend
 from graph import run_pipeline
 from schemas.models import PipelineState
 
@@ -64,6 +64,7 @@ def health() -> dict:
         "ok": True,
         "llm_provider": settings.llm_provider,
         "gemini_model": GEMINI_MODEL,
+        "storage": storage_backend(),
     }
 
 
