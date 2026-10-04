@@ -12,6 +12,21 @@ Upload an invoice, receipt, or KYC PDF/image. The app returns structured fields 
 
 ## What it does
 
+```mermaid
+flowchart TD
+  U[Upload] --> L[Size / type / rate checks]
+  L --> J[Job + temp file]
+  J --> O[OCR]
+  O --> X[Extract]
+  X --> V[Validate]
+  V -->|fail or low confidence| R[needs_review]
+  V -->|ok| C[Categorize]
+  C --> S[Store]
+  Q[Search + Password] --> K[X-API-Key]
+  K --> D[(processed_documents)]
+  D --> M[Masked JSON]
+```
+
 ```
 Upload → OCR (Mistral) → Extract JSON (Gemini/OpenAI/Anthropic)
       → Validate → if low confidence: needs_review
@@ -36,3 +51,22 @@ uvicorn main:app --host 127.0.0.1 --port 8000
 ```
 
 Never commit `.env`. Keys go in local `.env` or the host’s environment variables (e.g. Render).
+
+Optional: `MAX_UPLOAD_MB` (default 10), `UPLOAD_RATE_LIMIT` (default 10/minute).
+
+## Running tests
+
+From `docuflow/`:
+
+```bash
+python -m unittest discover -s tests -v
+```
+
+## Screenshots
+
+Place real captures in `docs/images/` (folder is gitkept). Until then these are placeholders:
+
+- Upload result: ![Upload result](docs/images/upload-result.png)
+- Search results: ![Search results](docs/images/search-results.png)
+- `needs_review` case: ![needs_review](docs/images/needs-review.png)
+

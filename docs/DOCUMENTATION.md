@@ -91,7 +91,11 @@ DocuFlow/
     ├── utils/
     │   └── sanitize.py       # Aadhaar/PAN mask on search responses
     ├── tests/
-    │   └── test_sanitize.py
+    │   └── test_*.py
+    ├── samples/              # Synthetic SAMPLE PDFs + ground_truth.json
+    ├── scripts/
+    │   ├── generate_samples.py
+    │   └── evaluate.py
     └── static/
         ├── index.html        # Upload | Search tabs
         ├── styles.css
@@ -106,10 +110,29 @@ DocuFlow/
 
 ### 5.1 Upload (browser or API)
 
+```mermaid
+flowchart TD
+  A[Client: Upload tab or POST /upload] --> B[FastAPI: size, type, rate limit]
+  B -->|413 / 400 / 429| Z[Error response]
+  B --> C[Save temp file, return job_id]
+  C --> D[Background: run_pipeline]
+  D --> E[intake]
+  E --> F[OCR Mistral]
+  F --> G[LLM extraction]
+  G --> H[Validation]
+  H -->|errors or score under 0.75| I[needs_review END]
+  H -->|ok| J[Categorization]
+  J --> K[Storage Supabase or SQLite fallback]
+  K --> L[status stored]
+  C --> M[Client polls GET /jobs/id]
+  M --> N[UI shows fields]
+```
+
 ```
 Browser UI (Upload tab)
   POST /upload (multipart: file + doc_type_hint)
         │
+        ├─ rate limit / size / type checks
         ├─ save temp file
         ├─ return { job_id, status: "processing" }   ◄── HTTP ends quickly
         │
@@ -122,32 +145,24 @@ Browser UI (Upload tab)
                   no  → categorize → storage (Supabase) → END
                   │
 Browser polls GET /jobs/{job_id} every 2s (up to 5 minutes)
-                  │
-UI shows status, category, confidence, extracted fields
 ```
 
 **Why background jobs?** Hosts like Render close long HTTP requests (~30–100s). OCR + LLM often take longer. Upload returns immediately; the client polls until `done` or `error`.
 
-Jobs are stored **in process memory**. A Render restart or new deploy drops in-flight `job_id`s.
+Jobs are stored **in process memory**. A Render restart or new deploy drops in-flight `job_id`s. The temp upload file is deleted when the job finishes (`_run_job` `finally`).
 
 ### 5.2 Search (browser or API)
 
-```
-Browser UI (Search tab)
-  query text + Password
-        │
-  GET /search?query=...
-  Header: X-API-Key: <same value as SEARCH_API_KEY>
-        │
-  401 if missing/wrong key
-        │
-  parse_search_intent (plain name skips LLM; phrases use LLM)
-        │
-  search_processed_documents (ILIKE on JSONB name fields)
-        │
-  sanitize_response (Aadhaar/PAN masked; DB unchanged)
-        │
-  JSON { query, results: [{ document_type, document_id, data }] }
+```mermaid
+flowchart TD
+  A[Search tab: query + Password] --> B[GET /search + X-API-Key]
+  B -->|missing or wrong key| C[401]
+  B -->|empty query| D[400]
+  B --> E[parse_search_intent]
+  E --> F[ILIKE processed_documents names]
+  F --> G[sanitize Aadhaar/PAN in response only]
+  G --> H[JSON results]
+  H --> I[Optional DELETE /documents with same key]
 ```
 
 ---
@@ -272,6 +287,14 @@ Nodes:
 
 `doc_type_hint` values: `invoice`, `receipt`, `kyc` (agents treat related aliases as KYC). Empty upload body → **400**.
 
+**Upload limits** (`POST /upload`):
+
+- Max size: `MAX_UPLOAD_MB` (optional, default **10**). Over limit → **413**.
+- Types: PDF, PNG, JPG/JPEG only (extension + content sniff). Anything else → **400**.
+- Per-IP rate limit: `UPLOAD_RATE_LIMIT` (optional, default **10** requests per minute). Over limit → **429**.
+
+These env vars are optional. If they are unset, the defaults above apply and the app still boots.
+
 ### 9.1 Identity search details
 
 `GET /search?query={text}` looks up **stored** rows only.
@@ -387,8 +410,10 @@ Copy `docuflow/.env.example` → `docuflow/.env` locally. On Render, set the **s
 | `LLM_API_KEY` | Gemini / OpenAI / Anthropic key |
 | `LLM_PROVIDER` | `gemini` \| `openai` \| `anthropic` |
 | `SEARCH_API_KEY` | Shared secret for `GET /search` and the UI Password field |
+| `MAX_UPLOAD_MB` | Optional. Max upload size in MB. Default `10` |
+| `UPLOAD_RATE_LIMIT` | Optional. Uploads per IP per minute. Default `10` |
 
-`config.py` **raises at import** if any are missing. A hosted app with incomplete env will crash on boot (`Missing required environment variable: …`).
+`config.py` **raises at import** if any **required** variable is missing. Optional vars above are not required. A hosted app with incomplete required env will crash on boot (`Missing required environment variable: …`).
 
 Pick a long random `SEARCH_API_KEY`. Do not commit it. Rotate any key that was pasted in chat or screenshots.
 
@@ -420,6 +445,20 @@ Sanitize tests (from `docuflow/`):
 ```bash
 python -m unittest tests.test_sanitize
 ```
+
+### Running tests
+
+From `docuflow/`:
+
+```bash
+python -m unittest discover -s tests -v
+```
+
+Tests mock OCR, LLM, and network. They set dummy env vars in `tests/__init__.py` so `config.py` can import without real keys.
+
+Sample PDFs: `python scripts/generate_samples.py`  
+Evaluation (needs real keys in `.env`): `python scripts/evaluate.py` — writes `docs/EVALUATION.md`. Do not invent metrics; only that script’s output belongs there.
+
 
 ---
 
@@ -471,6 +510,10 @@ User uploads `hotel-bill.pdf`, type **Invoice**.
 - Identity search (`GET /search`) with NL intent, ILIKE name match, Aadhaar/PAN response masking, `X-API-Key`  
 - Select-and-delete stored documents (`DELETE /documents`) from the Search tab  
 - UI Password field (not prefilled) mapped to that header  
+- Optional upload size cap, file-type check, and per-IP rate limit  
+- SQLite fallback when the Supabase hostname does not resolve  
+- Synthetic `samples/` PDFs plus `scripts/evaluate.py` for measured (not invented) metrics  
+- `unittest` suite covering validation, schemas, categorization, graph routing, and API limits  
 
 ---
 
@@ -483,10 +526,60 @@ User uploads `hotel-bill.pdf`, type **Invoice**.
 - Upload result UI can still show full `id_number`; masking is search-response only.  
 - Search Password in the browser is a shared env secret, not per-user auth. Anyone who knows it can query stored names.  
 - Gemini/OCR outages or quota still fail the job after retries.  
-- API keys must never be committed.
+- API keys must never be committed.  
+- Rate limiting is in-process memory (per instance), not a global gateway.  
+- SQLite fallback on Render is ephemeral disk; it is not a durable cloud database.  
+- Invoice total mismatches may fail **extraction** (Pydantic 0.01) before validation (0.05), so the job can be `error` instead of `needs_review`.
 
 ---
 
-## 18. Interview one-liner
+## 18. Retry behavior
+
+Values below are from the code, not guesses.
+
+| Call | Retries | Backoff | Status codes |
+|------|---------|---------|--------------|
+| Mistral OCR (`ocr_agent.py`) | None. One `httpx.post`, timeout 120s | — | Any HTTP error becomes `OCRError` |
+| OpenAI / Anthropic extraction | None. One request, timeout 120s | — | HTTP errors become `ExtractionError` |
+| Gemini extraction (`_call_gemini`) | Up to **3 attempts per model** in `GEMINI_FALLBACK_MODELS` | `time.sleep(1.5)` between attempts | Only **429** and **503** retry. Other HTTP errors stop that model |
+| Gemini models tried | Currently only `gemini-3.6-flash` (`GEMINI_FALLBACK_MODELS` is a one-item tuple) | — | Older names such as `gemini-2.5-flash` are not used |
+| JSON schema repair | **One** correction prompt after a parse/validation failure | Immediate second `_call_llm` | Not HTTP retries |
+
+There is no automatic retry around the LangGraph job as a whole. A failed job is stored as `{ status: "error" }` and `log_pipeline_error` is attempted once.
+
+---
+
+## 19. Security and data handling
+
+Honest current behavior (see also `SECURITY.md`):
+
+- Aadhaar and PAN values are stored **in full** in `processed_documents.extracted_data`.
+- Masking happens only in **search JSON responses**. The upload result panel is **not** masked.
+- Search “Password” is a **shared** `SEARCH_API_KEY`, not per-user login. Anyone with that secret can search and delete stored rows.
+- `POST /upload` is public. It now has size, type, and per-IP rate limits. That is not authentication.
+- Temp upload files are deleted in `_run_job` `finally`.
+- No encryption-at-rest in this repo (whatever Supabase/the host provides is outside this code).
+- No retention/deletion policy besides the Search-tab delete API.
+
+What I would do next: encrypt sensitive columns or use a vault, add a retention job, replace the shared search secret with per-user auth, and mask IDs on the upload result view too.
+
+---
+
+## 20. Troubleshooting
+
+| Symptom | Likely cause |
+|---------|----------------|
+| App crashes on boot with `Missing required environment variable: …` | A required key from section 12 is unset. Optional `MAX_UPLOAD_MB` / `UPLOAD_RATE_LIMIT` will not cause this. |
+| Gemini 404 / model not found | New keys often cannot use retired names such as `gemini-2.5-flash`. This repo calls **`gemini-3.6-flash` only**. |
+| 429 or 503 from Gemini | Quota or transient overload. Code retries 3 times with 1.5s sleep on those two codes, then fails the job. |
+| First Render request is slow | Free-tier cold start. Keep the tab open while the job polls. |
+| `Unknown job` after a while | Job map is in memory. Restart/deploy drops `job_id`s. |
+| Search 401 | Password / `X-API-Key` does not equal `SEARCH_API_KEY`. The field is not prefilled. |
+| Processed a doc but Search finds nothing | `needs_review` (and extraction errors) do **not** insert `processed_documents`. Only `stored` rows are searchable. |
+| `[Errno -2] Name or service not known` on store | Supabase URL does not resolve. The app falls back to local SQLite when the hostname cannot be resolved. |
+
+---
+
+## 21. Interview one-liner
 
 > I built a LangGraph document pipeline: Mistral OCR, LLM JSON extraction against Pydantic schemas, rule validation with a review gate, then Supabase storage. FastAPI exposes an upload UI with job polling plus a password-gated identity search that masks Aadhaar and PAN on the way out so other apps can integrate without parsing PDFs themselves.

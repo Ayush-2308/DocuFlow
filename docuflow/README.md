@@ -34,6 +34,23 @@ Search is separate from the graph:
 
 Failed pipeline runs are written to `pipeline_errors` via `log_pipeline_error`.
 
+```mermaid
+flowchart TD
+  subgraph upload [Upload]
+    A[POST /upload] --> B{limits}
+    B --> C[job]
+    C --> D[OCR to extract to validate]
+    D -->|needs_review| E[stop, not stored]
+    D -->|ok| F[categorize and store]
+  end
+  subgraph search [Search]
+    G[GET /search] --> H[X-API-Key]
+    H --> I[ILIKE names]
+    I --> J[mask Aadhaar/PAN in response]
+  end
+```
+
+
 ## Setup
 
 1. Create and activate a virtual environment (from the `docuflow/` directory):
