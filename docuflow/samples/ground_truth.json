@@ -1,0 +1,122 @@
+{
+  "documents": [
+    {
+      "file": "invoice_hotel.pdf",
+      "doc_type": "invoice",
+      "expected_outcome": "stored",
+      "expected_fields": {
+        "vendor_name": "SAMPLE Hotel Marriott Demo Pvt Ltd",
+        "invoice_number": "INV-SAMPLE-1001",
+        "date": "2024-03-15",
+        "subtotal": 8000.0,
+        "tax": 1440.0,
+        "total_amount": 9440.0
+      }
+    },
+    {
+      "file": "invoice_office_supplies.pdf",
+      "doc_type": "invoice",
+      "expected_outcome": "stored",
+      "expected_fields": {
+        "vendor_name": "SAMPLE Staples Office Depot Demo",
+        "invoice_number": "INV-SAMPLE-1002",
+        "date": "2024-04-02",
+        "subtotal": 620.0,
+        "tax": 111.6,
+        "total_amount": 731.6
+      }
+    },
+    {
+      "file": "invoice_software.pdf",
+      "doc_type": "invoice",
+      "expected_outcome": "stored",
+      "expected_fields": {
+        "vendor_name": "SAMPLE Adobe SaaS Subscription Demo",
+        "invoice_number": "INV-SAMPLE-1003",
+        "date": "2024-05-10",
+        "subtotal": 2000.0,
+        "tax": 360.0,
+        "total_amount": 2360.0
+      }
+    },
+    {
+      "file": "invoice_total_mismatch.pdf",
+      "doc_type": "invoice",
+      "expected_outcome": "needs_review",
+      "expected_fields": {
+        "vendor_name": "SAMPLE Mismatch Cafe Demo",
+        "invoice_number": "INV-SAMPLE-1999",
+        "date": "2099-12-01",
+        "subtotal": 100.0,
+        "tax": 18.0,
+        "total_amount": 999.0
+      }
+    },
+    {
+      "file": "receipt_coffee.pdf",
+      "doc_type": "receipt",
+      "expected_outcome": "stored",
+      "expected_fields": {
+        "merchant_name": "SAMPLE Starbucks Cafe Demo",
+        "date": "2024-06-08",
+        "total_amount": 400.0
+      }
+    },
+    {
+      "file": "receipt_fuel.pdf",
+      "doc_type": "receipt",
+      "expected_outcome": "stored",
+      "expected_fields": {
+        "merchant_name": "SAMPLE Petrol Pump Demo",
+        "date": "2024-06-09",
+        "total_amount": 1500.0
+      }
+    },
+    {
+      "file": "receipt_bookstore.pdf",
+      "doc_type": "receipt",
+      "expected_outcome": "stored",
+      "expected_fields": {
+        "merchant_name": "SAMPLE Demo Bookstore",
+        "date": "2024-07-01",
+        "total_amount": 120.0
+      }
+    },
+    {
+      "file": "kyc_aadhaar.pdf",
+      "doc_type": "kyc",
+      "expected_outcome": "stored",
+      "expected_fields": {
+        "full_name": "SAMPLE USER ONE",
+        "document_type": "Aadhaar",
+        "id_number": "999988887777",
+        "date_of_birth": "1990-01-01",
+        "address": "1 Sample Street, Demo Nagar, Test City 000001"
+      }
+    },
+    {
+      "file": "kyc_pan.pdf",
+      "doc_type": "kyc",
+      "expected_outcome": "stored",
+      "expected_fields": {
+        "full_name": "SAMPLE USER TWO",
+        "document_type": "PAN",
+        "id_number": "AAAAA9999A",
+        "date_of_birth": "1991-02-02",
+        "address": "2 Sample Lane, Demo Pur, Test City 000002"
+      }
+    },
+    {
+      "file": "kyc_passport.pdf",
+      "doc_type": "kyc",
+      "expected_outcome": "stored",
+      "expected_fields": {
+        "full_name": "SAMPLE USER THREE",
+        "document_type": "Passport",
+        "id_number": "Z9999999",
+        "date_of_birth": "1992-03-03",
+        "address": "3 Sample Road, Demo Bagh, Test City 000003"
+      }
+    }
+  ]
+}

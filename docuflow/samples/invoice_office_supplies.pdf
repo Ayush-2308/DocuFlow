@@ -1,0 +1,46 @@
+%PDF-1.4
+1 0 obj
+<< /Type /Catalog /Pages 2 0 R >>
+endobj
+2 0 obj
+<< /Type /Pages /Kids [3 0 R] /Count 1 >>
+endobj
+3 0 obj
+<< /Type /Page /Parent 2 0 R /MediaBox [0 0 612 792] /Contents 4 0 R /Resources << /Font << /F1 5 0 R >> >> >>
+endobj
+4 0 obj
+<< /Length 417 >>
+stream
+BT
+/F1 12 Tf
+50 780 Td
+(SAMPLE - NOT REAL) Tj
+16 TL
+16 TL T* (INVOICE) Tj
+16 TL T* (Vendor: SAMPLE Staples Office Depot Demo) Tj
+16 TL T* (Invoice number: INV-SAMPLE-1002) Tj
+16 TL T* (Date: 2024-04-02) Tj
+16 TL T* (Line items:) Tj
+16 TL T* (  Printer paper x 10 @ 50.00 = 500.00) Tj
+16 TL T* (  Stapler x 1 @ 120.00 = 120.00) Tj
+16 TL T* (Subtotal: 620.00) Tj
+16 TL T* (Tax: 111.60) Tj
+16 TL T* (Total: 731.60) Tj
+ET
+endstream
+endobj
+5 0 obj
+<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica >>
+endobj
+xref
+0 6
+0000000000 65535 f 
+0000000009 00000 n 
+0000000058 00000 n 
+0000000115 00000 n 
+0000000241 00000 n 
+0000000709 00000 n 
+trailer << /Size 6 /Root 1 0 R >>
+startxref
+779
+%%EOF
