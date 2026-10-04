@@ -1,3 +1,4 @@
+import env_setup  # noqa: F401
 import unittest
 
 from utils.sanitize import mask_aadhaar, mask_pan, sanitize_response
