@@ -16,6 +16,8 @@ class Settings:
     llm_api_key: str
     llm_provider: str
     search_api_key: str
+    max_upload_mb: int
+    upload_rate_per_minute: int
 
 
 def _require_env(name: str) -> str:
@@ -23,6 +25,18 @@ def _require_env(name: str) -> str:
     if not value:
         raise ValueError(f"Missing required environment variable: {name}")
     return value
+
+
+def _optional_positive_int(name: str, default: int) -> int:
+    raw = os.getenv(name)
+    if raw is None or not str(raw).strip():
+        return default
+    token = str(raw).strip().split("/", 1)[0]
+    try:
+        value = int(token)
+    except ValueError:
+        return default
+    return value if value > 0 else default
 
 
 settings = Settings(
@@ -34,4 +48,6 @@ settings = Settings(
     llm_api_key=_require_env("LLM_API_KEY"),
     llm_provider=_require_env("LLM_PROVIDER"),
     search_api_key=_require_env("SEARCH_API_KEY"),
+    max_upload_mb=_optional_positive_int("MAX_UPLOAD_MB", 10),
+    upload_rate_per_minute=_optional_positive_int("UPLOAD_RATE_LIMIT", 10),
 )

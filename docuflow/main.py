@@ -16,6 +16,8 @@ from config import settings
 from db.supabase_client import delete_documents, log_pipeline_error, storage_backend
 from graph import run_pipeline
 from schemas.models import PipelineState
+from utils.rate_limit import InMemoryRateLimiter
+from utils.uploads import validate_upload_file
 
 STATIC_DIR = Path(__file__).resolve().parent / "static"
 
@@ -36,6 +38,7 @@ app.add_middleware(_NoCacheStatic)
 
 _jobs: dict[str, dict[str, Any]] = {}
 _jobs_lock = Lock()
+_upload_limiter = InMemoryRateLimiter()
 
 
 class DeleteDocumentsBody(BaseModel):
@@ -70,15 +73,37 @@ def health() -> dict:
 
 @app.post("/upload")
 async def upload(
+    request: Request,
     background_tasks: BackgroundTasks,
     file: UploadFile = File(...),
     doc_type_hint: str | None = Form(None),
 ) -> dict:
+    client_ip = request.client.host if request.client else "unknown"
+    if not _upload_limiter.allow(client_ip, settings.upload_rate_per_minute):
+        raise HTTPException(
+            status_code=429,
+            detail=(
+                f"Too many uploads from this address. "
+                f"Limit is {settings.upload_rate_per_minute} requests per minute."
+            ),
+        )
+
     document_id = str(uuid.uuid4())
     suffix = Path(file.filename or "upload.bin").suffix
     contents = await file.read()
     if not contents:
         raise HTTPException(status_code=400, detail="Uploaded file is empty")
+
+    max_bytes = settings.max_upload_mb * 1024 * 1024
+    if len(contents) > max_bytes:
+        raise HTTPException(
+            status_code=413,
+            detail=f"File is too large. Maximum size is {settings.max_upload_mb} MB.",
+        )
+
+    type_error = validate_upload_file(file.filename, file.content_type, contents)
+    if type_error:
+        raise HTTPException(status_code=400, detail=type_error)
 
     with NamedTemporaryFile(delete=False, suffix=suffix) as tmp:
         temp_path = tmp.name
