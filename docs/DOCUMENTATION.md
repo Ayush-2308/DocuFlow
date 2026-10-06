@@ -457,8 +457,26 @@ python -m unittest discover -s tests -v
 Tests mock OCR, LLM, and network. They set dummy env vars in `tests/__init__.py` so `config.py` can import without real keys.
 
 Sample PDFs: `python scripts/generate_samples.py`  
-Evaluation (needs real keys in `.env`): `python scripts/evaluate.py` — writes `docs/EVALUATION.md`. Do not invent metrics; only that script’s output belongs there.
+Evaluation (needs real keys in `.env`): `python scripts/evaluate.py` — writes `docs/EVALUATION.md`. Do not invent metrics; only measured runs belong there.
 
+### Measured run (2026-10-06)
+
+Local uvicorn with real `.env`. Dummy samples: 4 invoices, 3 receipts, 3 KYC PDFs. **Delete timings are omitted.** Full tables: `docs/EVALUATION.md`.
+
+| Metric | Result |
+|---|---|
+| Mistral OCR on real dummy PDF | **429** in 4.70s (code 1300). PDF jobs did not extract. |
+| Gemini outcome accuracy | **8/10 (80.0%)** on dummy document text |
+| Gemini field accuracy | **37/48 (77.1%)** |
+| Average / p95 Gemini extract | **12.49s** / **25.72s** |
+| Average / p95 extract+validate(+store) | **12.56s** / **25.72s** |
+| Health `GET /health` | HTTP 200 in **1.470s** (gemini, sqlite) |
+| Average / p95 upload HTTP | **0.063s** / **0.106s** (all 10 uploads HTTP 200) |
+| Average / p95 upload E2E | **5.23s** / **8.90s** (job then Mistral OCR 429) |
+| Unauthenticated `GET /search` | HTTP **401** in **0.079s** |
+| Authenticated search (4 dummy names) | HTTP 200, 1 hit each; avg **0.048s**, p95 **0.056s** |
+
+Per-file extract: hotel 6.56s (6/6), office supplies 18.63s (6/6), software 6.99s (6/6), mismatch invoice Gemini 429, coffee 15.76s (3/3), fuel 13.70s (3/3), bookstore 5.54s (3/3), Aadhaar 7.78s (5/5), PAN 9.18s (5/5), passport Gemini 503.
 
 ---
 
