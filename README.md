@@ -140,8 +140,8 @@ uvicorn main:app --reload --host 127.0.0.1 --port 8000
 
 **7. Open the app**
 
-- UI: http://127.0.0.1:8000
-- Swagger docs: http://127.0.0.1:8000/docs
+- UI: https://docuflow-gbh3.onrender.com
+- Swagger docs: https://docuflow-gbh3.onrender.com/docs
 
 ## Environment Variables
 
