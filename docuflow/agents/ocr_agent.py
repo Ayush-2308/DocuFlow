@@ -1,4 +1,6 @@
 import base64
+import re
+import time
 from pathlib import Path
 
 import httpx
@@ -32,25 +34,49 @@ def run_ocr(file_path: str) -> str:
     content_type, document = _build_document_payload(path)
     payload = {"model": OCR_MODEL, "document": document}
 
-    try:
-        response = httpx.post(
-            settings.ocr_endpoint,
-            headers={
-                "Authorization": f"Bearer {settings.ocr_api_key}",
-                "Content-Type": "application/json",
-                "Accept": "application/json",
-            },
-            json=payload,
-            timeout=120.0,
-        )
-        response.raise_for_status()
-    except httpx.HTTPStatusError as exc:
-        detail = exc.response.text.strip() or exc.response.reason_phrase
-        raise OCRError(
-            f"Mistral OCR request failed with status {exc.response.status_code}: {detail}"
-        ) from exc
-    except httpx.HTTPError as exc:
-        raise OCRError(f"Mistral OCR request failed: {exc}") from exc
+    last_error = "Mistral OCR request failed"
+    response = None
+    for attempt in range(1, 3):
+        try:
+            response = httpx.post(
+                settings.ocr_endpoint,
+                headers={
+                    "Authorization": f"Bearer {settings.ocr_api_key}",
+                    "Content-Type": "application/json",
+                    "Accept": "application/json",
+                },
+                json=payload,
+                timeout=120.0,
+            )
+            if response.status_code in {429, 503}:
+                local_text = _extract_embedded_pdf_text(path)
+                if local_text:
+                    return local_text
+                last_error = (
+                    f"Mistral OCR request failed with status {response.status_code}: "
+                    f"{response.text.strip() or response.reason_phrase}"
+                )
+                time.sleep(8 * attempt)
+                continue
+            response.raise_for_status()
+            break
+        except httpx.HTTPStatusError as exc:
+            detail = exc.response.text.strip() or exc.response.reason_phrase
+            raise OCRError(
+                f"Mistral OCR request failed with status {exc.response.status_code}: {detail}"
+            ) from exc
+        except httpx.HTTPError as exc:
+            raise OCRError(f"Mistral OCR request failed: {exc}") from exc
+    else:
+        local_text = _extract_embedded_pdf_text(path)
+        if local_text:
+            return local_text
+        raise OCRError(last_error)
+    if response is None:
+        local_text = _extract_embedded_pdf_text(path)
+        if local_text:
+            return local_text
+        raise OCRError(last_error)
 
     try:
         body = response.json()
@@ -83,6 +109,25 @@ def _build_document_payload(path: Path) -> tuple[str, dict]:
 
     data_url = f"data:{content_type};base64,{encoded}"
     return content_type, {"type": "image_url", "image_url": data_url}
+
+
+def _extract_embedded_pdf_text(path: Path) -> str:
+    """Best-effort text from simple text PDFs when the OCR API is unavailable."""
+    if path.suffix.lower() != ".pdf":
+        return ""
+    raw = path.read_bytes().decode("latin-1", "replace")
+    lines: list[str] = []
+    for match in re.finditer(r"\((?:\\.|[^\\)])*\)\s*Tj", raw):
+        inner = match.group(0)
+        inner = inner[1 : inner.rfind(")")]
+        inner = (
+            inner.replace("\\(", "(")
+            .replace("\\)", ")")
+            .replace("\\\\", "\\")
+        )
+        if inner.strip():
+            lines.append(inner.strip())
+    return "\n".join(lines).strip()
 
 
 def _extract_text(body: dict) -> str:
