@@ -17,6 +17,7 @@ from db.supabase_client import delete_documents, log_pipeline_error, storage_bac
 from graph import run_pipeline
 from schemas.models import PipelineState
 from utils.rate_limit import InMemoryRateLimiter
+from utils.sanitize import mask_ids_in_text, sanitize_response
 from utils.uploads import validate_upload_file
 
 STATIC_DIR = Path(__file__).resolve().parent / "static"
@@ -159,6 +160,19 @@ def remove_documents(
     return {"deleted": deleted, "count": len(deleted)}
 
 
+def _public_state(state: PipelineState) -> dict[str, Any]:
+    """Return pipeline state for the UI with Aadhaar and PAN masked."""
+    payload = state.model_dump(mode="json")
+    hint = payload.get("doc_type_hint")
+    extracted = payload.get("extracted_data")
+    if isinstance(extracted, dict):
+        payload["extracted_data"] = sanitize_response(extracted, doc_hint=hint)
+    raw_text = payload.get("raw_text")
+    if isinstance(raw_text, str) and str(hint or "").strip().lower() in {"kyc", "kycdocument", "kyc_document"}:
+        payload["raw_text"] = mask_ids_in_text(raw_text)
+    return payload
+
+
 def _run_job(
     job_id: str,
     temp_path: str,
@@ -174,7 +188,7 @@ def _run_job(
         with _jobs_lock:
             _jobs[job_id] = {
                 "status": "done",
-                "result": state.model_dump(mode="json"),
+                "result": _public_state(state),
             }
     except Exception as exc:
         try:

@@ -265,24 +265,27 @@ def search_processed_documents(
 
     def supabase_call() -> list[dict]:
         needle = _safe_ilike_fragment(name)
-        if not needle:
+        typed = doc_type if doc_type in {"invoice", "receipt", "kyc"} else None
+        if not needle and typed is None:
             return []
-        pattern = f"%{needle}%"
         query = (
             _client()
             .table("processed_documents")
             .select(
                 "document_id, doc_type_hint, extracted_data, created_at, status, category"
             )
-            .or_(
-                f"extracted_data->>full_name.ilike.{pattern},"
-                f"extracted_data->>vendor_name.ilike.{pattern},"
-                f"extracted_data->>merchant_name.ilike.{pattern}"
-            )
             .order("created_at", desc=True)
         )
-        if doc_type in {"invoice", "receipt", "kyc"}:
-            query = query.ilike("doc_type_hint", doc_type)
+        if needle:
+            pattern = _quoted_ilike(needle)
+            query = query.or_(
+                f"extracted_data->>full_name.ilike.{pattern},"
+                f"extracted_data->>vendor_name.ilike.{pattern},"
+                f"extracted_data->>merchant_name.ilike.{pattern},"
+                f"raw_text.ilike.{pattern}"
+            )
+        if typed is not None:
+            query = query.ilike("doc_type_hint", typed)
         result = query.execute()
         _raise_if_error(result, "search processed_documents")
         return list(result.data or [])
@@ -291,6 +294,12 @@ def search_processed_documents(
         supabase_call,
         lambda: sqlite_store.search_processed_documents(name, doc_type),
     )
+
+
+def _quoted_ilike(needle: str) -> str:
+    """Quote an ILIKE pattern so multi-word names survive PostgREST's or() parser."""
+    escaped = needle.replace("\\", "\\\\").replace('"', '\\"')
+    return f'"%{escaped}%"'
 
 
 def _safe_ilike_fragment(value: str) -> str:

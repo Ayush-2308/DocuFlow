@@ -216,22 +216,29 @@ def search_processed_documents(
     doc_type: str | None = None,
 ) -> list[dict]:
     needle = _safe_ilike_fragment(name)
-    if not needle:
+    typed = doc_type if doc_type in {"invoice", "receipt", "kyc"} else None
+    if not needle and typed is None:
         return []
-    pattern = f"%{needle.lower()}%"
     sql = """
         SELECT document_id, doc_type_hint, extracted_data, created_at, status, category
         FROM processed_documents
-        WHERE (
-            LOWER(COALESCE(json_extract(extracted_data, '$.full_name'), '')) LIKE ?
-            OR LOWER(COALESCE(json_extract(extracted_data, '$.vendor_name'), '')) LIKE ?
-            OR LOWER(COALESCE(json_extract(extracted_data, '$.merchant_name'), '')) LIKE ?
-        )
+        WHERE 1 = 1
     """
-    params: list[Any] = [pattern, pattern, pattern]
-    if doc_type in {"invoice", "receipt", "kyc"}:
+    params: list[Any] = []
+    if needle:
+        pattern = f"%{needle.lower()}%"
+        sql += """
+            AND (
+                LOWER(COALESCE(json_extract(extracted_data, '$.full_name'), '')) LIKE ?
+                OR LOWER(COALESCE(json_extract(extracted_data, '$.vendor_name'), '')) LIKE ?
+                OR LOWER(COALESCE(json_extract(extracted_data, '$.merchant_name'), '')) LIKE ?
+                OR LOWER(COALESCE(raw_text, '')) LIKE ?
+            )
+        """
+        params.extend([pattern, pattern, pattern, pattern])
+    if typed is not None:
         sql += " AND LOWER(COALESCE(doc_type_hint, '')) = ?"
-        params.append(doc_type)
+        params.append(typed)
     sql += " ORDER BY created_at DESC"
     with _lock:
         conn = _connect()

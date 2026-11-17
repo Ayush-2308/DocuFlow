@@ -37,6 +37,27 @@ class SanitizeTests(unittest.TestCase):
         masked = sanitize_response(raw)
         self.assertEqual(masked["id_number"], "XXXXX1234F")
 
+    def test_sanitize_spaced_pan_and_numeric_aadhaar(self) -> None:
+        pan = sanitize_response(
+            {"document_type": "PAN Card", "id_number": "abcde 1234 f"},
+            doc_hint="kyc",
+        )
+        self.assertEqual(pan["id_number"], "XXXXX1234F")
+        aadhaar = sanitize_response(
+            {"document_type": "Aadhaar Card", "id_number": 234567890123},
+            doc_hint="kyc",
+        )
+        self.assertEqual(aadhaar["id_number"], "XXXX-XXXX-0123")
+
+    def test_mask_ids_inside_kyc_text(self) -> None:
+        from utils.sanitize import mask_ids_in_text
+
+        text = mask_ids_in_text("ID number: 2345 6789 0123 and PAN ABCDE1234F")
+        self.assertIn("XXXX-XXXX-0123", text)
+        self.assertIn("XXXXX1234F", text)
+        self.assertNotIn("ABCDE1234F", text)
+        self.assertNotIn("2345 6789 0123", text)
+
 
 if __name__ == "__main__":
     unittest.main()

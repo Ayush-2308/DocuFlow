@@ -1,8 +1,40 @@
+import re
 from typing import Any
 
 from agents.extraction_agent import ExtractionError, _call_llm, _parse_json_object
 from db.supabase_client import search_processed_documents
 from utils.sanitize import sanitize_response
+
+_DOC_WORDS = {
+    "kyc": "kyc",
+    "kycdocument": "kyc",
+    "aadhaar": "kyc",
+    "aadhar": "kyc",
+    "pan": "kyc",
+    "passport": "kyc",
+    "invoice": "invoice",
+    "invoices": "invoice",
+    "receipt": "receipt",
+    "receipts": "receipt",
+}
+_SKIP_WORDS = {
+    "show",
+    "find",
+    "me",
+    "my",
+    "the",
+    "last",
+    "latest",
+    "of",
+    "for",
+    "a",
+    "an",
+    "document",
+    "doc",
+    "pdf",
+    "file",
+    "card",
+}
 
 INTENT_PROMPT = """Parse this document-search request into JSON only.
 Keys:
@@ -15,49 +47,55 @@ User query:
 """
 
 def parse_search_intent(query: str) -> dict[str, Any]:
-    """Turn free text into {name, doc_type, latest}. Falls back to using the raw query as name."""
-    fallback = {"name": query.strip(), "doc_type": None, "latest": False}
-    if not query.strip():
-        return fallback
-    if _is_plain_name(query):
-        return fallback
+    """Turn free text into {name, doc_type, latest}.
+
+    Short queries and anything that names a document type are parsed locally.
+    That keeps "aadhaar", "kyc_pan", and a person's name from being rewritten
+    into a business name that only matches invoices.
+    """
+    cleaned = query.strip()
+    local = _local_intent(cleaned)
+    if not cleaned:
+        return local
+    if local["doc_type"] or len(cleaned.split()) <= 6:
+        return local
     try:
-        raw = _call_llm(INTENT_PROMPT.replace("{query}", query.strip()))
+        raw = _call_llm(INTENT_PROMPT.replace("{query}", cleaned))
         parsed, _error = _parse_json_object(raw)
         if parsed is None:
-            return fallback
-        name = str(parsed.get("name") or query).strip() or query.strip()
+            return local
+        name = str(parsed.get("name") or local["name"] or cleaned).strip()
         doc_type = parsed.get("doc_type")
         if isinstance(doc_type, str):
             doc_type = doc_type.strip().lower()
             if doc_type not in {"invoice", "receipt", "kyc"}:
-                doc_type = None
+                doc_type = local["doc_type"]
         else:
-            doc_type = None
-        latest = bool(parsed.get("latest"))
+            doc_type = local["doc_type"]
+        latest = bool(parsed.get("latest")) or local["latest"]
         return {"name": name, "doc_type": doc_type, "latest": latest}
     except (ExtractionError, TypeError, ValueError):
-        return fallback
+        return local
 
 
-def _is_plain_name(query: str) -> bool:
-    lowered = query.strip().lower()
-    cues = (
-        "show",
-        "find",
-        "last",
-        "latest",
-        "invoice",
-        "receipt",
-        "kyc",
-        "aadhaar",
-        "aadhar",
-        "pan",
-        "passport",
-    )
-    if any(cue in lowered for cue in cues):
-        return False
-    return len(query.split()) <= 4
+def _local_intent(query: str) -> dict[str, Any]:
+    normalized = query.replace("'s", " ").replace("’s", " ")
+    tokens = re.findall(r"[A-Za-z0-9]+", normalized)
+    lowered = [token.lower() for token in tokens]
+    doc_type = None
+    for token in lowered:
+        if token in _DOC_WORDS:
+            doc_type = _DOC_WORDS[token]
+    name_tokens = [
+        token
+        for token, low in zip(tokens, lowered)
+        if low not in _DOC_WORDS and low not in _SKIP_WORDS
+    ]
+    return {
+        "name": " ".join(name_tokens),
+        "doc_type": doc_type,
+        "latest": any(token in {"last", "latest"} for token in lowered),
+    }
 
 
 def search_identity(query: str) -> dict[str, Any]:
@@ -78,7 +116,7 @@ def search_identity(query: str) -> dict[str, Any]:
             {
                 "document_type": doc_type,
                 "document_id": row.get("document_id"),
-                "data": sanitize_response(data),
+                "data": sanitize_response(data, doc_hint=doc_type),
             }
         )
     results.sort(key=lambda item: type_order.get(item["document_type"], 9))

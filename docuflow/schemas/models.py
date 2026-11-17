@@ -100,12 +100,33 @@ class KYCDocument(BaseModel):
     def parse_date_of_birth(cls, value: Any) -> date:
         return _parse_date(value)
 
+    @field_validator("document_type", mode="before")
+    @classmethod
+    def normalize_document_type(cls, value: Any) -> Any:
+        if isinstance(value, KYCDocumentType):
+            return value
+        key = re.sub(r"[\s_\-]+", " ", str(value or "").strip().lower())
+        aliases = {
+            "aadhaar": KYCDocumentType.AADHAAR,
+            "aadhar": KYCDocumentType.AADHAAR,
+            "aadhaar card": KYCDocumentType.AADHAAR,
+            "aadhar card": KYCDocumentType.AADHAAR,
+            "uid": KYCDocumentType.AADHAAR,
+            "uidai": KYCDocumentType.AADHAAR,
+            "pan": KYCDocumentType.PAN,
+            "pan card": KYCDocumentType.PAN,
+            "permanent account number": KYCDocumentType.PAN,
+            "passport": KYCDocumentType.PASSPORT,
+            "indian passport": KYCDocumentType.PASSPORT,
+        }
+        return aliases.get(key, value)
+
     @field_validator("id_number", mode="before")
     @classmethod
     def normalize_id_number(cls, value: Any) -> str:
         if not isinstance(value, str):
             raise ValueError("id_number must be a string")
-        return value.strip().upper()
+        return re.sub(r"[\s\-]", "", value.strip().upper())
 
     @model_validator(mode="after")
     def validate_id_number_format(self) -> "KYCDocument":

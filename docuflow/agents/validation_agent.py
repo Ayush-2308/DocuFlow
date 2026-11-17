@@ -185,13 +185,14 @@ def _validate_id_number(id_number: Any, document_type: Any) -> str | None:
     raw = str(id_number).strip().upper()
     doc = str(document_type).strip().lower()
 
-    if doc == "aadhaar":
-        digits = re.sub(r"\s", "", raw)
+    if doc in {"aadhaar", "aadhar", "aadhaar card", "aadhar card"}:
+        digits = re.sub(r"\D", "", raw)
         if not AADHAAR_DIGITS.fullmatch(digits):
             return "id_number must be 12 digits for Aadhaar"
         return None
-    if doc == "pan":
-        if not PAN_PATTERN.fullmatch(raw):
+    if doc in {"pan", "pan card"}:
+        compact = re.sub(r"[\s\-]", "", raw)
+        if not PAN_PATTERN.fullmatch(compact):
             return "id_number must match PAN format ABCDE1234F"
         return None
     if doc == "passport":
